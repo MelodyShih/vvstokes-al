@@ -17,7 +17,7 @@ k = args.k
 gamma = Constant(args.gamma)
 
 distp = {"partition": True, "overlap_type": (DistributedMeshOverlapType.VERTEX, 1)}
-mesh = RectangleMesh(20, 20, 4, 4, distribution_parameters=distp)
+mesh = RectangleMesh(10, 10, 4, 4, distribution_parameters=distp)
 
 mh = MeshHierarchy(mesh, nref, reorder=True, distribution_parameters=distp)
 
@@ -26,8 +26,9 @@ mesh = mh[-1]
 V = FunctionSpace(mesh, "BDM", k)
 Q = FunctionSpace(mesh, "DG", k-1)
 Z = V * Q
+print("dim(Z) = ", Z.dim())
 z = Function(Z)
-u, p = split(z)
+u, p = TrialFunctions(Z)
 v, q = TestFunctions(Z)
 bcs = [DirichletBC(Z.sub(0), Constant((0., 0.)), "on_boundary")]
 
@@ -56,29 +57,31 @@ sigma = Constant(100.)
 h = CellSize(mesh)
 n = FacetNormal(mesh)
 
-def a(u, v, mu):
-    return mu * inner(2*sym(grad(u)), grad(v))*dx \
+def diffusion(u, v, mu):
+    return (mu*inner(2*sym(grad(u)), grad(v)))*dx \
         - mu * inner(avg(2*sym(grad(u))), 2*avg(outer(v, n))) * dS \
         - mu * inner(avg(2*sym(grad(v))), 2*avg(outer(u, n))) * dS \
         + mu * sigma/avg(h) * inner(2*avg(outer(u,n)),2*avg(outer(v,n))) * dS
 
-def a_bc(u, v, mu, bid, g): 
+def nitsche(u, v, mu, bid, g): 
     my_ds = ds if bid == "on_boundary" else ds(bid)
     return -inner(outer(v,n),2*mu*sym(grad(u)))*my_ds \
         -inner(outer(u-g,n),2*mu*sym(grad(v)))*my_ds \
         +mu*(sigma/h)*inner(v,u-g)*my_ds
 
-F = a(u, v, mu_expr(mesh))
+F = diffusion(u, v, mu_expr(mesh))
 for bc in bcs:
     if "DG" in str(bc._function_space):
         continue
     g = bc.function_arg
     bid = bc.sub_domain
-    F += a_bc(u, v, mu_expr(mesh), bid, g)
+    F += nitsche(u, v, mu_expr(mesh), bid, g)
 
 F += - p * div(v) * dx - div(u) * q * dx
 F += gamma * inner(div(u), div(v))*dx
-F += - 10 * (chi_n(mesh)-1)*v[1] * dx
+F += -10 * (chi_n(mesh)-1)*v[1] * dx
+a = lhs(F)
+l = rhs(F)
 
 fieldsplit_1 = {
     "ksp_type": "preonly",
@@ -149,8 +152,19 @@ mu_fun= mu(mh[-1])
 appctx = {"nu": mu_fun, "gamma": gamma}
 
 nsp = MixedVectorSpaceBasis(Z, [Z.sub(0), VectorSpaceBasis(constant=True)])
-problem = NonlinearVariationalProblem(F, z, bcs=bcs)
+problem = LinearVariationalProblem(a, l, z, bcs=bcs)
 solver = NonlinearVariationalSolver(problem, solver_parameters=params, options_prefix="ns_",
                                     appctx=appctx, nullspace=nsp)
 solver.solve()
 File("u.pvd").write(z.split()[0])
+
+
+if Z.dim() > 1e4 or mesh.mpi_comm().size > 1:
+    import sys; sys.exit()
+""" Demo on how to get the assembled """
+M = assemble(a, bcs=bcs)
+A = M.M[0, 0].handle # A is now a PETSc Mat type
+B = M.M[1, 0].handle
+
+Anp = A[:, :] # obtain a dense numpy matrix
+Bnp = B[:, :]
