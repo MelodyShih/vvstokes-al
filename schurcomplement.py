@@ -14,7 +14,7 @@ class DGMassInv(PCBase):
         massinv = assemble(Tensor(inner(u, v)*dx).inv)
         self.massinv = massinv.petscmat
         self.nuplusgammainv = nu.copy(deepcopy=True)
-        self.nuplusgammainv.project(-1./(nu+gamma))
+        self.nuplusgammainv.project(-(nu+gamma))
 
 
     def update(self, pc):
