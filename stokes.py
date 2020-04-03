@@ -1,6 +1,8 @@
 from firedrake import *
 from functools import reduce
+
 import argparse
+from petsc4py import PETSc
 
 parser = argparse.ArgumentParser(add_help=False)
 parser.add_argument("--nref", type=int, default=1)
@@ -17,7 +19,8 @@ k = args.k
 gamma = Constant(args.gamma)
 
 distp = {"partition": True, "overlap_type": (DistributedMeshOverlapType.VERTEX, 1)}
-mesh = RectangleMesh(10, 10, 4, 4, distribution_parameters=distp)
+N = 10
+mesh = RectangleMesh(N, N, 4, 4, distribution_parameters=distp)
 
 mh = MeshHierarchy(mesh, nref, reorder=True, distribution_parameters=distp)
 
@@ -80,10 +83,25 @@ for bc in bcs:
     F += nitsche(u, v, mu_expr(mesh), bid, g)
 
 F += - p * div(v) * dx - div(u) * q * dx
+F += -10 * (chi_n(mesh)-1)*v[1] * dx
 F += gamma*inner(div(u), div(v))*dx
-F += -10 * (chi_n(mesh)-1)*v[1] * dx #rhs
 a = lhs(F)
 l = rhs(F)
+
+M = assemble(a, bcs=bcs)
+A = M.M[0, 0].handle
+B = M.M[1, 0].handle
+
+# pp = TrialFunction(Q)
+# qq = TestFunction(Q)
+# W = assemble(Tensor(inner(pp, qq)*dx).inv).M[0,0].handle
+# BTWB = B.transposeMatMult(W*B)
+# BTWB *= args.gamma
+
+BTWB = assemble(gamma*inner(div(u), div(v))*dx, bcs=bcs).M[0,0].handle
+# BT = assemble(div(u)*q*dx, bcs=bcs).M.handle
+# B = BT.transpose()
+# W = assemble(p*q*dx, bcs=bcs)
 
 fieldsplit_1 = {
     "ksp_type": "preonly",
@@ -153,16 +171,37 @@ params = outer
 mu_fun= mu(mh[-1])
 appctx = {"nu": mu_fun, "gamma": gamma, "dr":dr}
 
+def aug_jacobian(X, J):
+    nested_IS = J.getNestISs()
+    Jsub = J.getLocalSubMatrix(nested_IS[0][0], nested_IS[0][0])
+    Jsub += BTWB
+    J.restoreLocalSubMatrix(nested_IS[0][0], nested_IS[0][0], Jsub)
+
+def modify_residual(X, F):
+    vdim = V.dim()
+    vel_is = PETSc.IS()
+    vel_is.createGeneral(range(vdim))
+    Xsub = X.getSubVector(vel_is)
+    Fsub = F.getSubVector(vel_is)
+    Fsub -= BTWB*Xsub
+    F.restoreSubVector(vel_is, Fsub)
+
 nsp = MixedVectorSpaceBasis(Z, [Z.sub(0), VectorSpaceBasis(constant=True)])
 problem = LinearVariationalProblem(a, l, z, bcs=bcs)
-solver = NonlinearVariationalSolver(problem, solver_parameters=params, options_prefix="ns_",
+solver = NonlinearVariationalSolver(problem,
+                                    solver_parameters=params,
+                                    options_prefix="ns_",
+                                    # post_jacobian_callback=aug_jacobian,
+                                    # post_function_callback=modify_residual,
                                     appctx=appctx, nullspace=nsp)
+
 solver.solve()
 File("u.pvd").write(z.split()[0])
 
 
 if Z.dim() > 1e4 or mesh.mpi_comm().size > 1:
     import sys; sys.exit()
+
 """ Demo on how to get the assembled """
 M = assemble(a, bcs=bcs)
 A = M.M[0, 0].handle # A is now a PETSc Mat type
