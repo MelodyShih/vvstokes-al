@@ -27,6 +27,8 @@ V = FunctionSpace(mesh, "BDM", k)
 Q = FunctionSpace(mesh, "DG", k-1)
 Z = V * Q
 print("dim(Z) = ", Z.dim())
+print("dim(V) = ", V.dim())
+print("dim(Q) = ", Q.dim())
 z = Function(Z)
 u, p = TrialFunctions(Z)
 v, q = TestFunctions(Z)
@@ -63,7 +65,7 @@ def diffusion(u, v, mu):
         - mu * inner(avg(2*sym(grad(v))), 2*avg(outer(u, n))) * dS \
         + mu * sigma/avg(h) * inner(2*avg(outer(u,n)),2*avg(outer(v,n))) * dS
 
-def nitsche(u, v, mu, bid, g): 
+def nitsche(u, v, mu, bid, g):
     my_ds = ds if bid == "on_boundary" else ds(bid)
     return -inner(outer(v,n),2*mu*sym(grad(u)))*my_ds \
         -inner(outer(u-g,n),2*mu*sym(grad(v)))*my_ds \
@@ -78,8 +80,8 @@ for bc in bcs:
     F += nitsche(u, v, mu_expr(mesh), bid, g)
 
 F += - p * div(v) * dx - div(u) * q * dx
-F += gamma * inner(div(u), div(v))*dx
-F += -10 * (chi_n(mesh)-1)*v[1] * dx
+F += gamma*inner(div(u), div(v))*dx
+F += -10 * (chi_n(mesh)-1)*v[1] * dx #rhs
 a = lhs(F)
 l = rhs(F)
 
@@ -129,7 +131,7 @@ outer = {
     "ksp_type": "fgmres",
     "ksp_rtol": 1.0e-6,
     "ksp_atol": 1.0e-10,
-    "ksp_max_it": 100,
+    "ksp_max_it": 1000,
     "ksp_monitor_true_residual": None,
     "ksp_converged_reason": None,
     "pc_type": "fieldsplit",
@@ -149,7 +151,7 @@ else:
     raise ValueError("please specify almg, allu or alamg for --solver-type")
 params = outer
 mu_fun= mu(mh[-1])
-appctx = {"nu": mu_fun, "gamma": gamma}
+appctx = {"nu": mu_fun, "gamma": gamma, "dr":dr}
 
 nsp = MixedVectorSpaceBasis(Z, [Z.sub(0), VectorSpaceBasis(constant=True)])
 problem = LinearVariationalProblem(a, l, z, bcs=bcs)
