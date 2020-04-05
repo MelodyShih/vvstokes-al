@@ -2,6 +2,7 @@ from firedrake import *
 from functools import reduce
 
 import argparse
+import numpy as np
 from petsc4py import PETSc
 
 parser = argparse.ArgumentParser(add_help=False)
@@ -10,16 +11,19 @@ parser.add_argument("--k", type=int, default=2)
 parser.add_argument("--solver-type", type=str, default="almg")
 parser.add_argument("--gamma", type=float, default=1e4)
 parser.add_argument("--dr", type=float, default=1e8)
+parser.add_argument("--N", type=int, default=10)
+parser.add_argument("--case", type=int, default=1)
 args, _ = parser.parse_known_args()
 
 
 nref = args.nref
 dr = args.dr
 k = args.k
+N = args.N
+case = args.case
 gamma = Constant(args.gamma)
 
 distp = {"partition": True, "overlap_type": (DistributedMeshOverlapType.VERTEX, 1)}
-N = 10
 mesh = RectangleMesh(N, N, 4, 4, distribution_parameters=distp)
 
 mh = MeshHierarchy(mesh, nref, reorder=True, distribution_parameters=distp)
@@ -84,24 +88,42 @@ for bc in bcs:
 
 F += - p * div(v) * dx - div(u) * q * dx
 F += -10 * (chi_n(mesh)-1)*v[1] * dx
-F += gamma*inner(div(u), div(v))*dx
-a = lhs(F)
-l = rhs(F)
 
-M = assemble(a, bcs=bcs)
-A = M.M[0, 0].handle
-B = M.M[1, 0].handle
+if case < 4:
+    ## Case 1,2,3:
+    # M = assemble(a, bcs=bcs)
+    # A = M.M[0, 0].handle
+    # B = M.M[1, 0].handle
+    # ptrial = TrialFunction(Q)
+    # ptest = TestFunction(Q)
+    # W  = assemble(Tensor(inner(ptrial, ptest)*dx).inv).M[0,0].handle
+    ## Check the correctness of BTWB (should be equal to A2-A)
+    # F += gamma*inner(div(u), div(v))*dx
+    # M2 = assemble(lhs(F), bcs=bcs)
+    # A2 = M2.M[0, 0].handle
+    # print((A2 - A - BTWB).norm())
 
-# pp = TrialFunction(Q)
-# qq = TestFunction(Q)
-# W = assemble(Tensor(inner(pp, qq)*dx).inv).M[0,0].handle
-# BTWB = B.transposeMatMult(W*B)
-# BTWB *= args.gamma
+    F += gamma*inner(div(u), div(v))*dx
+    a = lhs(F)
+    l = rhs(F)
+elif case == 4:
+    # Unaugmented system
+    a = lhs(F)
+    l = rhs(F)
 
-BTWB = assemble(gamma*inner(div(u), div(v))*dx, bcs=bcs).M[0,0].handle
-# BT = assemble(div(u)*q*dx, bcs=bcs).M.handle
-# B = BT.transpose()
-# W = assemble(p*q*dx, bcs=bcs)
+    # Form BTWB
+    M = assemble(a, bcs=bcs)
+    A = M.M[0, 0].handle
+    B = M.M[1, 0].handle
+    ptrial = TrialFunction(Q)
+    ptest = TestFunction(Q)
+    W = assemble(Tensor(1.0/mu(mh[-1])*inner(ptrial, ptest)*dx).inv).M[0,0].handle
+    BTWB = B.transposeMatMult(W*B)
+    BTWB *= args.gamma
+else:
+    raise ValueError("Unknown type of preconditioner %i" % case)
+
+
 
 fieldsplit_1 = {
     "ksp_type": "preonly",
@@ -169,30 +191,36 @@ else:
     raise ValueError("please specify almg, allu or alamg for --solver-type")
 params = outer
 mu_fun= mu(mh[-1])
-appctx = {"nu": mu_fun, "gamma": gamma, "dr":dr}
+appctx = {"nu": mu_fun, "gamma": gamma, "dr":dr, "case":case}
 
 def aug_jacobian(X, J):
-    nested_IS = J.getNestISs()
-    Jsub = J.getLocalSubMatrix(nested_IS[0][0], nested_IS[0][0])
-    Jsub += BTWB
-    J.restoreLocalSubMatrix(nested_IS[0][0], nested_IS[0][0], Jsub)
+    if case == 4:
+        nested_IS = J.getNestISs()
+        Jsub = J.getLocalSubMatrix(nested_IS[0][0], nested_IS[0][0])
+        Jsub += BTWB
+        J.restoreLocalSubMatrix(nested_IS[0][0], nested_IS[0][0], Jsub)
+    else:
+        return
 
 def modify_residual(X, F):
-    vdim = V.dim()
-    vel_is = PETSc.IS()
-    vel_is.createGeneral(range(vdim))
-    Xsub = X.getSubVector(vel_is)
-    Fsub = F.getSubVector(vel_is)
-    Fsub -= BTWB*Xsub
-    F.restoreSubVector(vel_is, Fsub)
+    if case == 4:
+        vdim = V.dim()
+        vel_is = PETSc.IS()
+        vel_is.createGeneral(range(vdim))
+        Xsub = X.getSubVector(vel_is)
+        Fsub = F.getSubVector(vel_is)
+        Fsub += BTWB*Xsub
+        F.restoreSubVector(vel_is, Fsub)
+    else:
+        return
 
 nsp = MixedVectorSpaceBasis(Z, [Z.sub(0), VectorSpaceBasis(constant=True)])
 problem = LinearVariationalProblem(a, l, z, bcs=bcs)
 solver = NonlinearVariationalSolver(problem,
                                     solver_parameters=params,
                                     options_prefix="ns_",
-                                    # post_jacobian_callback=aug_jacobian,
-                                    # post_function_callback=modify_residual,
+                                    post_jacobian_callback=aug_jacobian,
+                                    post_function_callback=modify_residual,
                                     appctx=appctx, nullspace=nsp)
 
 solver.solve()
