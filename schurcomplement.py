@@ -25,13 +25,11 @@ class DGMassInv(PCBase):
             self.scale = nu.copy(deepcopy=True)
             self.scale.project(-(nu+gamma))
         elif case == 2:
-            ## Case 2:
             massinv = assemble(Tensor(inner(u, v)*dx).inv)
             self.massinv = massinv.petscmat
             self.scale = nu.copy(deepcopy=True)
             self.scale.project(-(sqrt(dr)+gamma))
         elif case == 3:
-            # Case 3:
             viscmassinv = assemble(Tensor(-1.0/nu*inner(u, v)*dx).inv)
             massinv = assemble(Tensor(inner(u, v)*dx).inv)
             self.viscmassinv = viscmassinv.petscmat
@@ -39,7 +37,6 @@ class DGMassInv(PCBase):
             self.scale = nu.copy(deepcopy=True)
             self.scale.project(-gamma)
         elif case == 4:
-            ## Case 4:
             viscmassinv = assemble(Tensor(-1.0/nu*inner(u, v)*dx).inv)
             self.viscmassinv = viscmassinv.petscmat
             self.scale = nu.copy(deepcopy=True)

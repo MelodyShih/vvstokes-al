@@ -52,7 +52,14 @@ def chi_n(mesh):
     X = SpatialCoordinate(mesh)
     def indi(ci):
         return 1-exp(-delta * Max(0, sqrt(inner(ci-X, ci-X))-omega/2)**2)
-    indis = [indi(Constant((4*(cx+1)/3, 4*(cy+1)/3))) for cx in range(2) for cy in range(2)]
+    # indis = [indi(Constant((4*(cx+1)/3, 4*(cy+1)/3))) for cx in range(2) for cy in range(2)]
+    indis = []
+    np.random.seed(1)
+    for i in range(8):
+        cx = 2+np.random.uniform(-1,1)
+        cy = 2+np.random.uniform(-1,1)
+        # tmp = indi(Constant((cx,cy)))
+        indis.append(indi(Constant((cx,cy))))
     return reduce(lambda x, y : x*y, indis, Constant(1.0))
 
 def mu_expr(mesh):
@@ -61,6 +68,8 @@ def mu_expr(mesh):
 def mu(mesh):
     Qm = FunctionSpace(mesh, Q.ufl_element())
     return Function(Qm).interpolate(mu_expr(mesh))
+
+File("mu.pvd").write(mu(mesh))
 
 sigma = Constant(100.)
 h = CellSize(mesh)
@@ -75,8 +84,8 @@ def diffusion(u, v, mu):
 def nitsche(u, v, mu, bid, g):
     my_ds = ds if bid == "on_boundary" else ds(bid)
     return -inner(outer(v,n),2*mu*sym(grad(u)))*my_ds \
-        -inner(outer(u-g,n),2*mu*sym(grad(v)))*my_ds \
-        +mu*(sigma/h)*inner(v,u-g)*my_ds
+           -inner(outer(u-g,n),2*mu*sym(grad(v)))*my_ds \
+           +mu*(sigma/h)*inner(v,u-g)*my_ds
 
 F = diffusion(u, v, mu_expr(mesh))
 for bc in bcs:
