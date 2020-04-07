@@ -127,7 +127,8 @@ elif case == 4:
     ptrial = TrialFunction(Q)
     ptest = TestFunction(Q)
     W = assemble(Tensor(1.0/mu(mh[-1])*inner(ptrial, ptest)*dx).inv).M[0,0].handle
-    BTWB = B.transposeMatMult(W*B)
+    BTW = B.transposeMatMult(W)
+    BTWB = BTW*B
     BTWB *= args.gamma
 else:
     raise ValueError("Unknown type of preconditioner %i" % case)
@@ -213,13 +214,13 @@ def aug_jacobian(X, J):
 
 def modify_residual(X, F):
     if case == 4:
-        vdim = V.dim()
-        vel_is = PETSc.IS()
-        vel_is.createGeneral(range(vdim))
-        Xsub = X.getSubVector(vel_is)
-        Fsub = F.getSubVector(vel_is)
-        Fsub += BTWB*Xsub
-        F.restoreSubVector(vel_is, Fsub)
+        vel_is = Z._ises[0]
+        pre_is = Z._ises[1]
+        Fvel = F.getSubVector(vel_is)
+        Fpre = F.getSubVector(pre_is)
+        Fvel += BTW*Fpre
+        F.restoreSubVector(vel_is, Fvel)
+        F.restoreSubVector(pre_is, Fpre)
     else:
         return
 
