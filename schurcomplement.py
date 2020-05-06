@@ -19,7 +19,12 @@ class DGMassInv(PCBase):
         self.massinv = None
         self.case = case
 
-        if case == 1:
+        if case == 0:
+            massinv = assemble(Tensor(inner(u, v)*dx).inv)
+            self.massinv = massinv.petscmat
+            self.scale = nu.copy(deepcopy=True)
+            self.scale.project(-(1.0+gamma))
+        elif case == 1:
             massinv = assemble(Tensor(inner(u, v)*dx).inv)
             self.massinv = massinv.petscmat
             self.scale = nu.copy(deepcopy=True)
@@ -29,14 +34,14 @@ class DGMassInv(PCBase):
             self.massinv = massinv.petscmat
             self.scale = nu.copy(deepcopy=True)
             self.scale.project(-(sqrt(dr)+gamma))
-        elif case == 3:
+        elif case == 3 or case == 4:
             viscmassinv = assemble(Tensor(-1.0/nu*inner(u, v)*dx).inv)
             massinv = assemble(Tensor(inner(u, v)*dx).inv)
             self.viscmassinv = viscmassinv.petscmat
             self.massinv = massinv.petscmat
             self.scale = nu.copy(deepcopy=True)
             self.scale.project(-gamma)
-        elif case == 4:
+        elif case == 5:
             viscmassinv = assemble(Tensor(-1.0/nu*inner(u, v)*dx).inv)
             self.viscmassinv = viscmassinv.petscmat
             self.scale = nu.copy(deepcopy=True)
@@ -47,7 +52,7 @@ class DGMassInv(PCBase):
         pass
 
     def apply(self, pc, x, y):
-        if self.case < 4:
+        if self.case <= 4:
             # Case 1,2,3:
             tmp = y.duplicate()
             self.massinv.mult(x, tmp)
@@ -57,7 +62,7 @@ class DGMassInv(PCBase):
                 self.viscmassinv.multAdd(x,tmp,y)
             else:
                 tmp.copy(y)
-        elif self.case == 4:
+        elif self.case == 5:
             ## Case 4:
             self.viscmassinv.mult(x, y)
             with self.scale.dat.vec_wo as w:

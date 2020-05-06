@@ -12,7 +12,7 @@ parser.add_argument("--solver-type", type=str, default="almg")
 parser.add_argument("--gamma", type=float, default=1e4)
 parser.add_argument("--dr", type=float, default=1e8)
 parser.add_argument("--N", type=int, default=10)
-parser.add_argument("--case", type=int, default=1)
+parser.add_argument("--case", type=int, default=3)
 args, _ = parser.parse_known_args()
 
 
@@ -41,8 +41,8 @@ u, p = TrialFunctions(Z)
 v, q = TestFunctions(Z)
 bcs = [DirichletBC(Z.sub(0), Constant((0., 0.)), "on_boundary")]
 
-omega = 0.1
-delta = 200
+omega = 0.4
+delta = 10
 mu_min = Constant(dr**-0.5)
 mu_max = Constant(dr**0.5)
 
@@ -100,21 +100,24 @@ F += -10 * (chi_n(mesh)-1)*v[1] * dx
 
 if case < 4:
     ## Case 1,2,3:
+    # a = lhs(F)
     # M = assemble(a, bcs=bcs)
     # A = M.M[0, 0].handle
     # B = M.M[1, 0].handle
     # ptrial = TrialFunction(Q)
     # ptest = TestFunction(Q)
     # W  = assemble(Tensor(inner(ptrial, ptest)*dx).inv).M[0,0].handle
-    ## Check the correctness of BTWB (should be equal to A2-A)
+    # BTW = B.transposeMatMult(W)
+    # BTWB = BTW.matMult(B)
+    # BTWB *= args.gamma
+    # # Check the correctness of BTWB (should be equal to A2-A)
     # F += gamma*inner(div(u), div(v))*dx
     # M2 = assemble(lhs(F), bcs=bcs)
     # A2 = M2.M[0, 0].handle
     # print((A2 - A - BTWB).norm())
-
-    F += gamma*inner(div(u), div(v))*dx
-    a = lhs(F)
-    l = rhs(F)
+    Fgamma = F + gamma*inner(div(u), div(v))*dx
+    a = lhs(Fgamma)
+    l = rhs(Fgamma)
 elif case == 4:
     # Unaugmented system
     a = lhs(F)
@@ -125,10 +128,26 @@ elif case == 4:
     A = M.M[0, 0].handle
     B = M.M[1, 0].handle
     ptrial = TrialFunction(Q)
-    ptest = TestFunction(Q)
-    W = assemble(Tensor(1.0/mu(mh[-1])*inner(ptrial, ptest)*dx).inv).M[0,0].handle
+    ptest  = TestFunction(Q)
+    W = assemble(Tensor(inner(ptrial, ptest)*dx).inv).M[0,0].handle
     BTW = B.transposeMatMult(W)
-    BTWB = BTW*B
+    BTWB = BTW.matMult(B)
+    BTWB *= args.gamma
+elif case == 5:
+    # Unaugmented system
+    a = lhs(F)
+    l = rhs(F)
+
+    # Form BTWB
+    M = assemble(a, bcs=bcs)
+    A = M.M[0, 0].handle
+    B = M.M[1, 0].handle
+    ptrial = TrialFunction(Q)
+    ptest  = TestFunction(Q)
+    W = assemble(Tensor(1.0/mu(mh[-1])*inner(ptrial, ptest)*dx).inv).M[0,0].handle
+    # W = assemble(Tensor(inner(ptrial, ptest)*dx).inv).M[0,0].handle
+    BTW = B.transposeMatMult(W)
+    BTWB = BTW.matMult(B)
     BTWB *= args.gamma
 else:
     raise ValueError("Unknown type of preconditioner %i" % case)
@@ -181,7 +200,7 @@ outer = {
     "ksp_type": "fgmres",
     "ksp_rtol": 1.0e-6,
     "ksp_atol": 1.0e-10,
-    "ksp_max_it": 1000,
+    "ksp_max_it": 10,
     "ksp_monitor_true_residual": None,
     "ksp_converged_reason": None,
     "pc_type": "fieldsplit",
@@ -203,6 +222,7 @@ params = outer
 mu_fun= mu(mh[-1])
 appctx = {"nu": mu_fun, "gamma": gamma, "dr":dr, "case":case}
 
+# Solve Stoke's equation
 def aug_jacobian(X, J):
     if case == 4:
         nested_IS = J.getNestISs()
@@ -225,6 +245,7 @@ def modify_residual(X, F):
         return
 
 nsp = MixedVectorSpaceBasis(Z, [Z.sub(0), VectorSpaceBasis(constant=True)])
+# nsp = MixedVectorSpaceBasis(Z, [Z[0], VectorSpaceBasis(vecs=[assemble( (1/mu) * TestFunction(Q)]))
 problem = LinearVariationalProblem(a, l, z, bcs=bcs)
 solver = NonlinearVariationalSolver(problem,
                                     solver_parameters=params,
@@ -233,17 +254,107 @@ solver = NonlinearVariationalSolver(problem,
                                     post_function_callback=modify_residual,
                                     appctx=appctx, nullspace=nsp)
 
+# Write out solution
 solver.solve()
 File("u.pvd").write(z.split()[0])
 
 
-if Z.dim() > 1e4 or mesh.mpi_comm().size > 1:
-    import sys; sys.exit()
+# if Z.dim() > 1e4 or mesh.mpi_comm().size > 1:
+#     import sys; sys.exit()
 
 """ Demo on how to get the assembled """
-M = assemble(a, bcs=bcs)
-A = M.M[0, 0].handle # A is now a PETSc Mat type
-B = M.M[1, 0].handle
+# M = assemble(a, bcs=bcs)
+# A = M.M[0, 0].handle # A is now a PETSc Mat type
+# B = M.M[1, 0].handle
 
+"""
+# Eigenvalue analysis
+M = assemble(a, bcs=bcs)
+Agamma = M.M[0, 0].handle # A is now a PETSc Mat type
+B      = M.M[1, 0].handle
+if case == 4:
+    Agammanp = Agamma[:,:] + 0.5*(BTWB[:,:] + BTWB.transpose()[:,:])
+else:
+    Agammanp = Agamma[:, :] # obtain a dense numpy matrix
+Bnp      = B[:, :]
+
+## Schur complement of original Sgamma
+Sgamma = -np.matmul(np.matmul(Bnp, np.linalg.inv(Agammanp)), Bnp.transpose())
+
+## Schur complement of original S
+# Form -BTAinvB
+M = assemble(lhs(F), bcs=bcs)
+A = M.M[0, 0].handle
 Anp = A[:, :] # obtain a dense numpy matrix
-Bnp = B[:, :]
+S = -np.matmul(np.matmul(Bnp, np.linalg.inv(Anp)), Bnp.transpose())
+
+## Preconditioner of Sgamma
+pp = TrialFunction(Q)
+qq = TestFunction(Q)
+
+#-M_p(1/nu)^{-1}
+viscmass    = assemble(Tensor(-1.0/mu_fun*inner(pp, qq)*dx))
+viscmassinv = assemble(Tensor(-1.0/mu_fun*inner(pp, qq)*dx).inv)
+viscmass    = viscmass.petscmat
+viscmassinv = viscmassinv.petscmat
+
+#-M_p
+massinv = assemble(Tensor(-inner(pp, qq)*dx).inv)
+massinv = massinv.petscmat
+
+# Pinv
+if case == 3:
+    Pinv = viscmassinv[:,:] + args.gamma*massinv[:,:]
+elif case == 4:
+    Pinv = (1.0 + args.gamma)*viscmassinv[:,:]
+
+# Comparison -M_p(1/nu)^{-1}, -M_p^{-1}
+MpinvS   = np.matmul(massinv[:,:], S)
+eigval, eigvec = np.linalg.eig(MpinvS)
+print("-Mp: ")
+print("[", np.partition(eigval, 2)[2], ", ", max(eigval), "]")
+Amu = max(eigval)
+amu = np.partition(eigval, 2)[2]
+print("Amu = ", Amu)
+print("amu = ", amu)
+print((args.gamma + 1)/(args.gamma + 1/amu), (args.gamma + 1)/(args.gamma + 1/Amu))
+
+MpmuinvS = np.matmul(viscmassinv[:,:], S)
+eigval, eigvec = np.linalg.eig(MpmuinvS)
+print("-Mp(1/mu): ")
+print("[", np.partition(eigval, 2)[2], ", ", max(eigval), "]")
+Cmu = max(eigval)
+cmu = np.partition(eigval, 2)[2]
+print("Cmu = ", Cmu)
+print("cmu = ", cmu)
+print((args.gamma + 1)/(args.gamma + 1/cmu), (args.gamma + 1)/(args.gamma + 1/Cmu))
+
+
+# MpinvMpmu = np.matmul(massinv[:,:], viscmass[:,:])
+eigval, eigvec = np.linalg.eig(MpinvMpmu)
+print("MpinvMp(1/mu): ")
+print("[", min(eigval), ", ", max(eigval), "]")
+print("optimal 1/a:", 1.0/min(eigval))
+a = min(eigval)
+a = 1/dr**0.5
+
+## Preconditioned system
+PinvSgamma = np.matmul(Pinv, Sgamma)
+eigval, eigvec = np.linalg.eig(PinvSgamma)
+
+if case == 3:
+    print("1/a = ", 1.0/a, "gamma = ", args.gamma)
+    dmu = 1 - 1.0/a/args.gamma
+    Dmu = 1 + (1 - cmu)/(a*cmu*args.gamma)
+    print("Dmu = ", Dmu)
+    print("dmu = ", dmu)
+elif case == 4:
+    dmu = (args.gamma + 1/Cmu)/(args.gamma + 1)
+    Dmu = (args.gamma + 1/cmu)/(args.gamma + 1)
+
+print("PinvSgamma: ")
+print("[", np.partition(eigval, 2)[2], ", ", max(eigval), "]")
+print("1/Dmu = ", 1.0/Dmu)
+if abs(dmu) > 1e-15:
+    print("1/dmu = ", 1.0/dmu)
+"""
