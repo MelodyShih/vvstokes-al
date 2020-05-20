@@ -281,7 +281,7 @@ solver.solve()
 # print(norm(z.split()[0]-z3.split()[0]))
 # print(norm(z.split()[1]-z3.split()[1]))
 
-File(f"up-{args.case}.pvd").write(*(z.split()()
+File(f"up-{args.case}.pvd").write(*(z.split()))
 
 
 # if Z.dim() > 1e4 or mesh.mpi_comm().size > 1:
