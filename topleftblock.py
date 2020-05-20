@@ -32,10 +32,13 @@ mesh = mh[-1]
 
 V = FunctionSpace(mesh, "BDM", k)
 Q = FunctionSpace(mesh, "DG", k-1)
+Z = V * Q
 
 sol = Function(V)
 u = TrialFunction(V)
 v = TestFunction(V)
+p = TrialFunction(Q)
+q = TestFunction(Q)
 bcs = [DirichletBC(V, Constant((0., 0.)), "on_boundary")]
 
 omega = 0.1 #0.4, 0.1
@@ -99,10 +102,37 @@ if case < 4:
     Fgamma = F + gamma*inner(div(u), div(v))*dx
     a = lhs(Fgamma)
     l = rhs(Fgamma)
+elif case == 4 or case == 5: # Shat = M_p(1/mu), W = M_p^{-1}
+    # Unaugmented system
+    a = lhs(F)
+    l = rhs(F)
+
+    # Get B
+    tmpu, tmpp = TrialFunctions(Z)
+    tmpv, tmpq = TestFunctions(Z)
+    tmpF = -tmpq * div(tmpu) * dx
+    tmpbcs = [DirichletBC(Z.sub(0), Constant((0., 0.)), "on_boundary")]
+    tmpa = lhs(tmpF)
+    M = assemble(tmpa, bcs=tmpbcs)
+    B = M.M[1, 0].handle
+
+    # Get W
+    ptrial = TrialFunction(Q)
+    ptest  = TestFunction(Q)
+    if case == 4:
+        W = assemble(Tensor(inner(ptrial, ptest)*dx).inv).M[0,0].handle
+    if case == 5:
+        W = assemble(Tensor(1.0/mu(mh[-1])*inner(ptrial, ptest)*dx).inv).M[0,0].handle
+
+    # Form BTWB
+    BTW = B.transposeMatMult(W)
+    BTW *= args.gamma
+    BTWB = BTW.matMult(B)
 else:
     raise ValueError("Unknown type of preconditioner %i" % case)
 
 common = {
+    "snes_type": "ksponly",
     "ksp_type": "richardson",
     "ksp_norm_type": "unpreconditioned",
     "ksp_rtol": 1.0e-6,
@@ -151,11 +181,18 @@ else:
 mu_fun= mu(mh[-1])
 appctx = {"nu": mu_fun, "gamma": gamma, "dr":dr, "case":case}
 
-# Solve Stoke's equation
+# Solve Stoke's equation (assume that we're solving div(u) = 0)
+def aug_jacobian(X, J):
+    if case == 4 or case == 5:
+        J += BTWB
+    else:
+        return
+
 problem = LinearVariationalProblem(a, l, sol, bcs=bcs)
 solver = LinearVariationalSolver(problem,
                                  solver_parameters=params,
-                                 options_prefix="topleft_")
+                                 options_prefix="topleft_",
+                                 post_jacobian_callback=aug_jacobian)
 
 # Write out solution
 solver.solve()
