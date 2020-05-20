@@ -13,6 +13,8 @@ parser.add_argument("--gamma", type=float, default=1e4)
 parser.add_argument("--dr", type=float, default=1e8)
 parser.add_argument("--N", type=int, default=10)
 parser.add_argument("--case", type=int, default=3)
+parser.add_argument("--nonzero-rhs", dest="nonzero_rhs", default=False, action="store_true")
+parser.add_argument("--nonzero-initial-guess", dest="nonzero_initial_guess", default=False, action="store_true")
 args, _ = parser.parse_known_args()
 
 
@@ -97,6 +99,11 @@ for bc in bcs:
 
 F += - p * div(v) * dx - div(u) * q * dx
 F += -10 * (chi_n(mesh)-1)*v[1] * dx
+if args.nonzero_rhs:
+    divrhs = SpatialCoordinate(mesh)[0]-2
+else:
+    divrhs = Constant(0)
+F += divrhs * q * dx
 
 if case < 4:
     ## Case 1,2,3:
@@ -115,7 +122,7 @@ if case < 4:
     # M2 = assemble(lhs(F), bcs=bcs)
     # A2 = M2.M[0, 0].handle
     # print((A2 - A - BTWB).norm())
-    Fgamma = F + gamma*inner(div(u), div(v))*dx
+    Fgamma = F + Constant(gamma)*inner((div(u)-divrhs), div(v))*dx 
     a = lhs(Fgamma)
     l = rhs(Fgamma)
 elif case == 4:
@@ -246,17 +253,35 @@ def modify_residual(X, F):
 
 nsp = MixedVectorSpaceBasis(Z, [Z.sub(0), VectorSpaceBasis(constant=True)])
 # nsp = MixedVectorSpaceBasis(Z, [Z[0], VectorSpaceBasis(vecs=[assemble( (1/mu) * TestFunction(Q)]))
+if args.nonzero_initial_guess:
+    z.split()[0].project(Constant((1., 1.)))
+    z.split()[1].interpolate(SpatialCoordinate(mesh)[1]-2)
+
 problem = LinearVariationalProblem(a, l, z, bcs=bcs)
-solver = NonlinearVariationalSolver(problem,
-                                    solver_parameters=params,
-                                    options_prefix="ns_",
-                                    post_jacobian_callback=aug_jacobian,
-                                    post_function_callback=modify_residual,
-                                    appctx=appctx, nullspace=nsp)
+solver = LinearVariationalSolver(problem,
+                                 solver_parameters=params,
+                                 options_prefix="ns_",
+                                 post_jacobian_callback=aug_jacobian,
+                                 post_function_callback=modify_residual,
+                                 appctx=appctx, nullspace=nsp)
 
 # Write out solution
 solver.solve()
-File("u.pvd").write(z.split()[0])
+
+# uncomment lines below to write out the solution. then run with --case 3 first
+# and then with --case 4 after to make sure that the 'manual/triple matrix
+# product' augmented lagrangian implementation does the same thing as the
+# variational version.
+
+# with DumbCheckpoint(f"u-{args.case}", mode=FILE_UPDATE) as checkpoint:
+#     checkpoint.store(z, name="up")
+# z3 = z.copy(deepcopy=True)
+# with DumbCheckpoint(f"u-{3}", mode=FILE_READ) as checkpoint:
+#     checkpoint.load(z3, name="up")
+# print(norm(z.split()[0]-z3.split()[0]))
+# print(norm(z.split()[1]-z3.split()[1]))
+
+File(f"up-{args.case}.pvd").write(*(z.split()()
 
 
 # if Z.dim() > 1e4 or mesh.mpi_comm().size > 1:
