@@ -131,8 +131,8 @@ elif case == 4:
     ptest  = TestFunction(Q)
     W = assemble(Tensor(inner(ptrial, ptest)*dx).inv).M[0,0].handle
     BTW = B.transposeMatMult(W)
+    BTW *= args.gamma
     BTWB = BTW.matMult(B)
-    BTWB *= args.gamma
 elif case == 5:
     # Unaugmented system
     a = lhs(F)
@@ -147,8 +147,8 @@ elif case == 5:
     W = assemble(Tensor(1.0/mu(mh[-1])*inner(ptrial, ptest)*dx).inv).M[0,0].handle
     # W = assemble(Tensor(inner(ptrial, ptest)*dx).inv).M[0,0].handle
     BTW = B.transposeMatMult(W)
+    BTW *= args.gamma
     BTWB = BTW.matMult(B)
-    BTWB *= args.gamma
 else:
     raise ValueError("Unknown type of preconditioner %i" % case)
 
