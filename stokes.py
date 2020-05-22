@@ -16,7 +16,7 @@ parser.add_argument("--case", type=int, default=3)
 parser.add_argument("--nonzero-rhs", dest="nonzero_rhs", default=False, action="store_true")
 parser.add_argument("--nonzero-initial-guess", dest="nonzero_initial_guess", default=False, action="store_true")
 parser.add_argument("--quad", dest="quad", default=False, action="store_true")
-parser.add_argument("--itref", type=int, default=1)
+parser.add_argument("--itref", type=int, default=0)
 args, _ = parser.parse_known_args()
 
 
@@ -297,7 +297,7 @@ if args.nonzero_initial_guess:
     z.split()[1].interpolate(SpatialCoordinate(mesh)[1]-2)
 
 
-for i in range(args.itref):
+for i in range(args.itref+1):
     problem = LinearVariationalProblem(a, l, z, bcs=bcs)
     solver = LinearVariationalSolver(problem,
                                      solver_parameters=params,
