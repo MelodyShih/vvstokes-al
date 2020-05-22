@@ -49,8 +49,8 @@ u, p = TrialFunctions(Z)
 v, q = TestFunctions(Z)
 bcs = [DirichletBC(Z.sub(0), Constant((0., 0.)), "on_boundary")]
 
-omega = 0.4
-delta = 10
+omega = 0.1 #0.4, 0.1
+delta = 200 #10, 200
 mu_min = Constant(dr**-0.5)
 mu_max = Constant(dr**0.5)
 
@@ -66,8 +66,22 @@ def chi_n(mesh):
     for i in range(8):
         cx = 2+np.random.uniform(-1,1)
         cy = 2+np.random.uniform(-1,1)
-        # tmp = indi(Constant((cx,cy)))
         indis.append(indi(Constant((cx,cy))))
+    # Another test:
+    # for i in range(4):
+    #     cx = 2+np.random.uniform(-1,1)
+    #     cy = 2+np.random.uniform(-1,1)
+    #     indis.append(indi(Constant((cx,cy))))
+    # for i in range(2):
+    #     cx = 3+np.random.uniform(-1,1)
+    #     cy = 3+np.random.uniform(-1,1)
+    #     indis.append(indi(Constant((cx,cy))))
+    # for i in range(2):
+    #     cx = 3+np.random.uniform(-1,1)
+    #     cy = 1+np.random.uniform(-1,1)
+    #     indis.append(indi(Constant((cx,cy))))
+    # indis.append(indi(Constant((cx,cy))))
+
     return reduce(lambda x, y : x*y, indis, Constant(1.0))
 
 def mu_expr(mesh):
@@ -256,7 +270,7 @@ appctx = {"nu": mu_fun, "gamma": gamma, "dr":dr, "case":case}
 
 # Solve Stoke's equation
 def aug_jacobian(X, J):
-    if case == 4:
+    if case == 4 or case == 5:
         nested_IS = J.getNestISs()
         Jsub = J.getLocalSubMatrix(nested_IS[0][0], nested_IS[0][0])
         Jsub += BTWB
@@ -265,7 +279,7 @@ def aug_jacobian(X, J):
         return
 
 def modify_residual(X, F):
-    if case == 4:
+    if case == 4 or case == 5:
         vel_is = Z._ises[0]
         pre_is = Z._ises[1]
         Fvel = F.getSubVector(vel_is)
@@ -360,54 +374,70 @@ massinv = assemble(Tensor(-inner(pp, qq)*dx).inv)
 massinv = massinv.petscmat
 
 # Pinv
-if case == 3:
+if case == 3 or case == 4:
     Pinv = viscmassinv[:,:] + args.gamma*massinv[:,:]
-elif case == 4:
+elif case == 5:
     Pinv = (1.0 + args.gamma)*viscmassinv[:,:]
 
-# Comparison -M_p(1/nu)^{-1}, -M_p^{-1}
-MpinvS   = np.matmul(massinv[:,:], S)
-eigval, eigvec = np.linalg.eig(MpinvS)
-print("-Mp: ")
-print("[", np.partition(eigval, 2)[2], ", ", max(eigval), "]")
-Amu = max(eigval)
-amu = np.partition(eigval, 2)[2]
-print("Amu = ", Amu)
-print("amu = ", amu)
-print((args.gamma + 1)/(args.gamma + 1/amu), (args.gamma + 1)/(args.gamma + 1/Amu))
-
+# # Comparison -M_p(1/nu)^{-1}, -M_p^{-1}
+# MpinvS   = np.matmul(massinv[:,:], S)
+# eigval, eigvec = np.linalg.eig(MpinvS)
+# print("-Mp: ")
+# print("[", np.partition(eigval, 2)[2], ", ", max(eigval), "]")
+# Amu = max(eigval)
+# amu = np.partition(eigval, 2)[2]
+# print("Amu = ", Amu)
+# print("amu = ", amu)
+# print((args.gamma + 1)/(args.gamma + 1/amu), (args.gamma + 1)/(args.gamma + 1/Amu))
+#
 MpmuinvS = np.matmul(viscmassinv[:,:], S)
 eigval, eigvec = np.linalg.eig(MpmuinvS)
 print("-Mp(1/mu): ")
 print("[", np.partition(eigval, 2)[2], ", ", max(eigval), "]")
 Cmu = max(eigval)
 cmu = np.partition(eigval, 2)[2]
+cmu = np.real(cmu)
 print("Cmu = ", Cmu)
 print("cmu = ", cmu)
-print((args.gamma + 1)/(args.gamma + 1/cmu), (args.gamma + 1)/(args.gamma + 1/Cmu))
-
+# print((args.gamma + 1/cmu)/(args.gamma + 1), (args.gamma + 1/Cmu)/(args.gamma + 1))
+# print((args.gamma + 1)/(args.gamma + 1/cmu), (args.gamma + 1)/(args.gamma + 1/Cmu))
 
 # MpinvMpmu = np.matmul(massinv[:,:], viscmass[:,:])
-eigval, eigvec = np.linalg.eig(MpinvMpmu)
-print("MpinvMp(1/mu): ")
-print("[", min(eigval), ", ", max(eigval), "]")
-print("optimal 1/a:", 1.0/min(eigval))
-a = min(eigval)
+# eigval, eigvec = np.linalg.eig(MpinvMpmu)
+# print("MpinvMp(1/mu): ")
+# print("[", min(eigval), ", ", max(eigval), "]")
+# print("optimal 1/a:", 1.0/min(eigval))
+# a = min(eigval)
+
 a = 1/dr**0.5
+A = dr**0.5
+
+#
+if case == 3 or case == 4:
+    print("1/a = ", 1.0/a, "gamma = ", args.gamma)
+    dmu = 1 - 1.0/a/args.gamma
+    w = (1+a*cmu*args.gamma)/(1+a*args.gamma)
+    print("(1+acmugamma)/(1+agamma)", w)
+    w = 0.9
+    T = 1/cmu*w*viscmassinv[:,:] + (1/(a*cmu)*(1-w)+args.gamma)*massinv[:,:]
+    TinvMmu = np.matmul(T, Sgamma)
+    eigval, eigvec = np.linalg.eig(TinvMmu)
+    print("Eq(27)")
+    print("[", np.partition(eigval, 2)[2], ", ", max(eigval), "]")
+
+    # Dmu = 1 + (1 - cmu)/(a*cmu*args.gamma)
+    Dmu = 1 + (1 - w)/(a*cmu*args.gamma)
+    print("Dmu = ", Dmu)
+    print(args.gamma/(args.gamma + (1-cmu)/a/cmu))
+    print(args.gamma*w/cmu/(args.gamma + (1-w)/a/cmu))
+    print("dmu = ", dmu)
+elif case == 5:
+    dmu = (args.gamma + 1/Cmu)/(args.gamma + 1)
+    Dmu = (args.gamma + 1/cmu)/(args.gamma + 1)
 
 ## Preconditioned system
 PinvSgamma = np.matmul(Pinv, Sgamma)
 eigval, eigvec = np.linalg.eig(PinvSgamma)
-
-if case == 3:
-    print("1/a = ", 1.0/a, "gamma = ", args.gamma)
-    dmu = 1 - 1.0/a/args.gamma
-    Dmu = 1 + (1 - cmu)/(a*cmu*args.gamma)
-    print("Dmu = ", Dmu)
-    print("dmu = ", dmu)
-elif case == 4:
-    dmu = (args.gamma + 1/Cmu)/(args.gamma + 1)
-    Dmu = (args.gamma + 1/cmu)/(args.gamma + 1)
 
 print("PinvSgamma: ")
 print("[", np.partition(eigval, 2)[2], ", ", max(eigval), "]")
