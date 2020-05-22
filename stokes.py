@@ -15,6 +15,7 @@ parser.add_argument("--N", type=int, default=10)
 parser.add_argument("--case", type=int, default=3)
 parser.add_argument("--nonzero-rhs", dest="nonzero_rhs", default=False, action="store_true")
 parser.add_argument("--nonzero-initial-guess", dest="nonzero_initial_guess", default=False, action="store_true")
+parser.add_argument("--itref", type=int, default=1)
 args, _ = parser.parse_known_args()
 
 
@@ -97,13 +98,15 @@ for bc in bcs:
     bid = bc.sub_domain
     F += nitsche(u, v, mu_expr(mesh), bid, g)
 
-F += - p * div(v) * dx - div(u) * q * dx
+F += - p * div(v) * dx(degree=2*(k-1)) - div(u) * q * dx(degree=2*(k-1))
 F += -10 * (chi_n(mesh)-1)*v[1] * dx
 if args.nonzero_rhs:
     divrhs = SpatialCoordinate(mesh)[0]-2
 else:
     divrhs = Constant(0)
-F += divrhs * q * dx
+F += divrhs * q * dx(degree=2*(k-1))
+
+Fgamma = F + Constant(gamma)*inner((div(u)-divrhs), div(v))*dx(degree=2*(k-1))
 
 if case < 4:
     ## Case 1,2,3:
@@ -122,7 +125,6 @@ if case < 4:
     # M2 = assemble(lhs(F), bcs=bcs)
     # A2 = M2.M[0, 0].handle
     # print((A2 - A - BTWB).norm())
-    Fgamma = F + Constant(gamma)*inner((div(u)-divrhs), div(v))*dx 
     a = lhs(Fgamma)
     l = rhs(Fgamma)
 elif case == 4:
@@ -201,7 +203,7 @@ fieldsplit_0_mg = {
     "mg_coarse_assembled_pc_factor_mat_solver_type": "superlu_dist",
 }
 
-outer = {
+params = {
     "snes_type": "ksponly",
     "mat_type": "nest",
     "ksp_type": "fgmres",
@@ -218,14 +220,31 @@ outer = {
 }
 
 if args.solver_type == "almg":
-    outer["fieldsplit_0"] = fieldsplit_0_mg
+    params["fieldsplit_0"] = fieldsplit_0_mg
 elif args.solver_type == "allu":
-    outer["fieldsplit_0"] = fieldsplit_0_lu
+    params["fieldsplit_0"] = fieldsplit_0_lu
 elif args.solver_type == "alamg":
-    outer["fieldsplit_0"] = fieldsplit_0_hypre
+    params["fieldsplit_0"] = fieldsplit_0_hypre
+elif args.solver_type == "lu":
+    params = {
+        "snes_type": "ksponly",
+        "snes_monitor": None,
+        "snes_atol": 1e-10,
+        "snes_rtol": 1e-10,
+        "mat_type": "aij",
+        "pmat_type": "aij",
+        "ksp_type": "preonly",
+        "ksp_rtol": 1.0e-10,
+        "ksp_atol": 1.0e-10,
+        "ksp_max_it": 300,
+        "ksp_monitor_true_residual": None,
+        "ksp_converged_reason": None,
+        "pc_type": "lu",
+        "pc_factor_mat_solver_type": "superlu",
+    }
 else:
     raise ValueError("please specify almg, allu or alamg for --solver-type")
-params = outer
+
 mu_fun= mu(mh[-1])
 appctx = {"nu": mu_fun, "gamma": gamma, "dr":dr, "case":case}
 
@@ -257,16 +276,23 @@ if args.nonzero_initial_guess:
     z.split()[0].project(Constant((1., 1.)))
     z.split()[1].interpolate(SpatialCoordinate(mesh)[1]-2)
 
-problem = LinearVariationalProblem(a, l, z, bcs=bcs)
-solver = LinearVariationalSolver(problem,
-                                 solver_parameters=params,
-                                 options_prefix="ns_",
-                                 post_jacobian_callback=aug_jacobian,
-                                 post_function_callback=modify_residual,
-                                 appctx=appctx, nullspace=nsp)
 
-# Write out solution
-solver.solve()
+for i in range(args.itref):
+    problem = LinearVariationalProblem(a, l, z, bcs=bcs)
+    solver = LinearVariationalSolver(problem,
+                                     solver_parameters=params,
+                                     options_prefix="ns_",
+                                     post_jacobian_callback=aug_jacobian,
+                                     post_function_callback=modify_residual,
+                                     appctx=appctx, nullspace=nsp)
+
+    # Write out solution
+    solver.solve()
+    with assemble(action(Fgamma, z), bcs=homogenize(bcs)).dat.vec_ro as v:
+        print('Residual with    grad-div', v.norm())
+    with assemble(action(F, z), bcs=homogenize(bcs)).dat.vec_ro as w:
+        print('Residual without grad-div', w.norm())
+
 
 # uncomment lines below to write out the solution. then run with --case 3 first
 # and then with --case 4 after to make sure that the 'manual/triple matrix
