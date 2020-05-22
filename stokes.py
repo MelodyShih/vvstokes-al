@@ -273,7 +273,7 @@ def aug_jacobian(X, J):
     if case == 4 or case == 5:
         nested_IS = J.getNestISs()
         Jsub = J.getLocalSubMatrix(nested_IS[0][0], nested_IS[0][0])
-        Jsub += BTWB
+        Jsub.axpy(1, BTWB, structure=Jsub.Structure.SUBSET_NONZERO_PATTERN)
         J.restoreLocalSubMatrix(nested_IS[0][0], nested_IS[0][0], Jsub)
     else:
         return
