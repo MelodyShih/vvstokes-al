@@ -15,6 +15,7 @@ parser.add_argument("--N", type=int, default=10)
 parser.add_argument("--case", type=int, default=3)
 parser.add_argument("--nonzero-rhs", dest="nonzero_rhs", default=False, action="store_true")
 parser.add_argument("--nonzero-initial-guess", dest="nonzero_initial_guess", default=False, action="store_true")
+parser.add_argument("--quad", dest="quad", default=False, action="store_true")
 parser.add_argument("--itref", type=int, default=1)
 args, _ = parser.parse_known_args()
 
@@ -27,14 +28,18 @@ case = args.case
 gamma = Constant(args.gamma)
 
 distp = {"partition": True, "overlap_type": (DistributedMeshOverlapType.VERTEX, 1)}
-mesh = RectangleMesh(N, N, 4, 4, distribution_parameters=distp)
+mesh = RectangleMesh(N, N, 4, 4, distribution_parameters=distp, quadrilateral=args.quad)
 
 mh = MeshHierarchy(mesh, nref, reorder=True, distribution_parameters=distp)
 
 mesh = mh[-1]
 
-V = FunctionSpace(mesh, "BDM", k)
-Q = FunctionSpace(mesh, "DG", k-1)
+if args.quad:
+    V = FunctionSpace(mesh, "RTCF", k)
+    Q = FunctionSpace(mesh, "DQ", k-1)
+else:
+    V = FunctionSpace(mesh, "BDM", k)
+    Q = FunctionSpace(mesh, "DG", k-1)
 Z = V * Q
 print("dim(Z) = ", Z.dim())
 print("dim(V) = ", V.dim())
@@ -75,7 +80,7 @@ def mu(mesh):
 File("mu.pvd").write(mu(mesh))
 
 sigma = Constant(100.)
-h = CellSize(mesh)
+h = CellDiameter(mesh)
 n = FacetNormal(mesh)
 
 def diffusion(u, v, mu):
