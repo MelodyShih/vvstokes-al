@@ -205,6 +205,7 @@ fieldsplit_0_mg = {
 
 params = {
     "snes_type": "ksponly",
+    "snes_monitor": None,
     "mat_type": "nest",
     "ksp_type": "fgmres",
     "ksp_rtol": 1.0e-6,
