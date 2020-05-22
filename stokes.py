@@ -43,8 +43,8 @@ u, p = TrialFunctions(Z)
 v, q = TestFunctions(Z)
 bcs = [DirichletBC(Z.sub(0), Constant((0., 0.)), "on_boundary")]
 
-omega = 0.1 #0.4, 0.1
-delta = 200 #10, 200
+omega = 0.4 #0.4, 0.1
+delta = 10 #10, 200
 mu_min = Constant(dr**-0.5)
 mu_max = Constant(dr**0.5)
 
@@ -120,7 +120,7 @@ else:
 F += divrhs * q * dx
 
 if case < 4:
-    ## Case 1,2,3:
+    # # Case 1,2,3:
     # a = lhs(F)
     # M = assemble(a, bcs=bcs)
     # A = M.M[0, 0].handle
@@ -129,14 +129,14 @@ if case < 4:
     # ptest = TestFunction(Q)
     # W  = assemble(Tensor(inner(ptrial, ptest)*dx).inv).M[0,0].handle
     # BTW = B.transposeMatMult(W)
+    # BTW *= args.gamma
     # BTWB = BTW.matMult(B)
-    # BTWB *= args.gamma
     # # Check the correctness of BTWB (should be equal to A2-A)
     # F += gamma*inner(div(u), div(v))*dx
     # M2 = assemble(lhs(F), bcs=bcs)
     # A2 = M2.M[0, 0].handle
     # print((A2 - A - BTWB).norm())
-    Fgamma = F + Constant(gamma)*inner((div(u)-divrhs), div(v))*dx 
+    Fgamma = F + Constant(gamma)*inner((div(u)-divrhs), div(v))*dx
     a = lhs(Fgamma)
     l = rhs(Fgamma)
 elif case == 4:
@@ -219,9 +219,9 @@ outer = {
     "snes_type": "ksponly",
     "mat_type": "nest",
     "ksp_type": "fgmres",
-    "ksp_rtol": 1.0e-6,
+    "ksp_rtol": 1.0e-10,
     "ksp_atol": 1.0e-10,
-    "ksp_max_it": 10,
+    "ksp_max_it": 100,
     "ksp_monitor_true_residual": None,
     "ksp_converged_reason": None,
     "pc_type": "fieldsplit",
@@ -265,37 +265,39 @@ def modify_residual(X, F):
     else:
         return
 
-nsp = MixedVectorSpaceBasis(Z, [Z.sub(0), VectorSpaceBasis(constant=True)])
-# nsp = MixedVectorSpaceBasis(Z, [Z[0], VectorSpaceBasis(vecs=[assemble( (1/mu) * TestFunction(Q)]))
-if args.nonzero_initial_guess:
-    z.split()[0].project(Constant((1., 1.)))
-    z.split()[1].interpolate(SpatialCoordinate(mesh)[1]-2)
-
-problem = LinearVariationalProblem(a, l, z, bcs=bcs)
-solver = LinearVariationalSolver(problem,
-                                 solver_parameters=params,
-                                 options_prefix="ns_",
-                                 post_jacobian_callback=aug_jacobian,
-                                 post_function_callback=modify_residual,
-                                 appctx=appctx, nullspace=nsp)
-
-# Write out solution
-solver.solve()
-
-# uncomment lines below to write out the solution. then run with --case 3 first
-# and then with --case 4 after to make sure that the 'manual/triple matrix
-# product' augmented lagrangian implementation does the same thing as the
-# variational version.
-
+# nsp = MixedVectorSpaceBasis(Z, [Z.sub(0), VectorSpaceBasis(constant=True)])
+# # nsp = MixedVectorSpaceBasis(Z, [Z[0], VectorSpaceBasis(vecs=[assemble( (1/mu) * TestFunction(Q)]))
+# if args.nonzero_initial_guess:
+#     z.split()[0].project(Constant((1., 1.)))
+#     z.split()[1].interpolate(SpatialCoordinate(mesh)[1]-2)
+#
+# problem = LinearVariationalProblem(a, l, z, bcs=bcs)
+# solver  = LinearVariationalSolver(problem,
+#                                   solver_parameters=params,
+#                                   options_prefix="ns_",
+#                                   post_jacobian_callback=aug_jacobian,
+#                                   post_function_callback=modify_residual,
+#                                   appctx=appctx, nullspace=nsp)
+#
+# # Write out solution
+# solver.solve()
+#
+# # uncomment lines below to write out the solution. then run with --case 3 first
+# # and then with --case 4 after to make sure that the 'manual/triple matrix
+# # product' augmented lagrangian implementation does the same thing as the
+# # variational version.
+#
 # with DumbCheckpoint(f"u-{args.case}", mode=FILE_UPDATE) as checkpoint:
 #     checkpoint.store(z, name="up")
 # z3 = z.copy(deepcopy=True)
 # with DumbCheckpoint(f"u-{3}", mode=FILE_READ) as checkpoint:
 #     checkpoint.load(z3, name="up")
-# print(norm(z.split()[0]-z3.split()[0]))
-# print(norm(z.split()[1]-z3.split()[1]))
-
-File(f"up-{args.case}.pvd").write(*(z.split()))
+# print("absolute diff in vel: ", norm(z.split()[0]-z3.split()[0]))
+# print("relative diff in vel: ", norm(z.split()[0]-z3.split()[0])/norm(z.split()[0]))
+# print("absolute diff in pre: ", norm(z.split()[1]-z3.split()[1]))
+# print("relative diff in pre: ", norm(z.split()[1]-z3.split()[1])/norm(z.split()[1]))
+#
+# File(f"up-{args.case}.pvd").write(*(z.split()))
 
 
 # if Z.dim() > 1e4 or mesh.mpi_comm().size > 1:
@@ -311,7 +313,7 @@ File(f"up-{args.case}.pvd").write(*(z.split()))
 M = assemble(a, bcs=bcs)
 Agamma = M.M[0, 0].handle # A is now a PETSc Mat type
 B      = M.M[1, 0].handle
-if case == 4:
+if case == 4 or case == 5:
     Agammanp = Agamma[:,:] + 0.5*(BTWB[:,:] + BTWB.transpose()[:,:])
 else:
     Agammanp = Agamma[:, :] # obtain a dense numpy matrix
@@ -341,35 +343,30 @@ viscmassinv = viscmassinv.petscmat
 massinv = assemble(Tensor(-inner(pp, qq)*dx).inv)
 massinv = massinv.petscmat
 
-# Pinv
-if case == 3 or case == 4:
-    Pinv = viscmassinv[:,:] + args.gamma*massinv[:,:]
-elif case == 5:
-    Pinv = (1.0 + args.gamma)*viscmassinv[:,:]
 
-# # Comparison -M_p(1/nu)^{-1}, -M_p^{-1}
-# MpinvS   = np.matmul(massinv[:,:], S)
-# eigval, eigvec = np.linalg.eig(MpinvS)
-# print("-Mp: ")
-# print("[", np.partition(eigval, 2)[2], ", ", max(eigval), "]")
-# Amu = max(eigval)
-# amu = np.partition(eigval, 2)[2]
-# print("Amu = ", Amu)
-# print("amu = ", amu)
-# print((args.gamma + 1)/(args.gamma + 1/amu), (args.gamma + 1)/(args.gamma + 1/Amu))
-#
+# Comparison -M_p(1/nu)^{-1}, -M_p^{-1}
+MpinvS   = np.matmul(massinv[:,:], S)
+eigval, eigvec = np.linalg.eig(MpinvS)
+print("-Mp: ")
+print("[", np.partition(eigval, 2)[1], ", ", max(eigval), "]")
+Amu = max(eigval)
+amu = np.partition(eigval, 2)[1]
+print("Amu = ", Amu)
+print("amu = ", amu)
+print("MpinvS: ", (args.gamma + 1)/(args.gamma + 1/amu), (args.gamma + 1)/(args.gamma + 1/Amu))
+
 MpmuinvS = np.matmul(viscmassinv[:,:], S)
 eigval, eigvec = np.linalg.eig(MpmuinvS)
 print("-Mp(1/mu): ")
-print("[", np.partition(eigval, 2)[2], ", ", max(eigval), "]")
+print("[", np.partition(eigval, 2)[1], ", ", max(eigval), "]")
 Cmu = max(eigval)
-cmu = np.partition(eigval, 2)[2]
+cmu = np.partition(eigval, 2)[1]
 cmu = np.real(cmu)
 print("Cmu = ", Cmu)
 print("cmu = ", cmu)
-# print((args.gamma + 1/cmu)/(args.gamma + 1), (args.gamma + 1/Cmu)/(args.gamma + 1))
-# print((args.gamma + 1)/(args.gamma + 1/cmu), (args.gamma + 1)/(args.gamma + 1/Cmu))
+print("MpmuinvS: ", (args.gamma + 1)/(args.gamma + 1/cmu), (args.gamma + 1)/(args.gamma + 1/Cmu))
 
+## Finding a
 # MpinvMpmu = np.matmul(massinv[:,:], viscmass[:,:])
 # eigval, eigvec = np.linalg.eig(MpinvMpmu)
 # print("MpinvMp(1/mu): ")
@@ -380,36 +377,43 @@ print("cmu = ", cmu)
 a = 1/dr**0.5
 A = dr**0.5
 
-#
 if case == 3 or case == 4:
     print("1/a = ", 1.0/a, "gamma = ", args.gamma)
     dmu = 1 - 1.0/a/args.gamma
     w = (1+a*cmu*args.gamma)/(1+a*args.gamma)
     print("(1+acmugamma)/(1+agamma)", w)
-    w = 0.9
-    T = 1/cmu*w*viscmassinv[:,:] + (1/(a*cmu)*(1-w)+args.gamma)*massinv[:,:]
-    TinvMmu = np.matmul(T, Sgamma)
-    eigval, eigvec = np.linalg.eig(TinvMmu)
-    print("Eq(27)")
-    print("[", np.partition(eigval, 2)[2], ", ", max(eigval), "]")
+    # w = 0.9
+    # T = 1/cmu*w*viscmassinv[:,:] + (1/(a*cmu)*(1-w)+args.gamma)*massinv[:,:]
+    # TinvMmu = np.matmul(T, Sgamma)
+    # eigval, eigvec = np.linalg.eig(TinvMmu)
+    # print("Eq(27)")
+    # print("[", np.partition(eigval, 2)[1], ", ", max(eigval), "]")
 
-    # Dmu = 1 + (1 - cmu)/(a*cmu*args.gamma)
     Dmu = 1 + (1 - w)/(a*cmu*args.gamma)
     print("Dmu = ", Dmu)
-    print(args.gamma/(args.gamma + (1-cmu)/a/cmu))
-    print(args.gamma*w/cmu/(args.gamma + (1-w)/a/cmu))
     print("dmu = ", dmu)
 elif case == 5:
     dmu = (args.gamma + 1/Cmu)/(args.gamma + 1)
     Dmu = (args.gamma + 1/cmu)/(args.gamma + 1)
+else:
+    raise ValueError("Unknown type of preconditioner %i" % case)
 
 ## Preconditioned system
+# Pinv
+if case == 3 or case == 4:
+    Pinv = viscmassinv[:,:] + args.gamma*massinv[:,:]
+elif case == 5:
+    Pinv = (1.0 + args.gamma)*viscmassinv[:,:]
+else:
+    raise ValueError("Unknown type of preconditioner %i" % case)
+
 PinvSgamma = np.matmul(Pinv, Sgamma)
 eigval, eigvec = np.linalg.eig(PinvSgamma)
 
 print("PinvSgamma: ")
-print("[", np.partition(eigval, 2)[2], ", ", max(eigval), "]")
-print("1/Dmu = ", 1.0/Dmu)
+print("[", np.partition(eigval, 2)[1], ", ", max(eigval), "]")
+# np.save(f"eig-{args.case}-{args.gamma}-{args.dr}.npy", eigval)
+print("Estimation: 1/Dmu = ", 1.0/Dmu)
 if abs(dmu) > 1e-15:
     print("1/dmu = ", 1.0/dmu)
 """
