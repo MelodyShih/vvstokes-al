@@ -41,8 +41,8 @@ p = TrialFunction(Q)
 q = TestFunction(Q)
 bcs = [DirichletBC(V, Constant((0., 0.)), "on_boundary")]
 
-omega = 0.1 #0.4, 0.1
-delta = 200 #10, 200
+omega = 0.4 #0.4, 0.1
+delta = 10 #10, 200
 mu_min = Constant(dr**-0.5)
 mu_max = Constant(dr**0.5)
 
@@ -102,7 +102,7 @@ if case < 4:
     Fgamma = F + gamma*inner(div(u), div(v))*dx
     a = lhs(Fgamma)
     l = rhs(Fgamma)
-elif case == 4 or case == 5: # Shat = M_p(1/mu), W = M_p^{-1}
+elif case == 4 or case == 5:
     # Unaugmented system
     a = lhs(F)
     l = rhs(F)
@@ -179,12 +179,11 @@ else:
     raise ValueError("please specify almg, allu or alamg for --solver-type")
 
 mu_fun= mu(mh[-1])
-appctx = {"nu": mu_fun, "gamma": gamma, "dr":dr, "case":case}
 
 # Solve Stoke's equation (assume that we're solving div(u) = 0)
 def aug_jacobian(X, J):
     if case == 4 or case == 5:
-        J += BTWB
+        J.axpy(1, BTWB, structure=J.Structure.SUBSET_NONZERO_PATTERN)
     else:
         return
 
