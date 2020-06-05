@@ -13,6 +13,7 @@ parser.add_argument("--gamma", type=float, default=1e4)
 parser.add_argument("--dr", type=float, default=1e8)
 parser.add_argument("--N", type=int, default=10)
 parser.add_argument("--case", type=int, default=3)
+parser.add_argument("--itref", type=int, default=0)
 args, _ = parser.parse_known_args()
 
 
@@ -41,8 +42,8 @@ p = TrialFunction(Q)
 q = TestFunction(Q)
 bcs = [DirichletBC(V, Constant((0., 0.)), "on_boundary")]
 
-omega = 0.4 #0.4, 0.1
-delta = 10 #10, 200
+omega = 0.1 #0.4, 0.1
+delta = 200 #10, 200
 mu_min = Constant(dr**-0.5)
 mu_max = Constant(dr**0.5)
 
@@ -97,9 +98,9 @@ for bc in bcs:
     F += nitsche(u, v, mu_expr(mesh), bid, g)
 
 F += -10 * (chi_n(mesh)-1)*v[1] * dx
+Fgamma = F + gamma*inner(div(u), div(v))*dx
 
 if case < 4:
-    Fgamma = F + gamma*inner(div(u), div(v))*dx
     a = lhs(Fgamma)
     l = rhs(Fgamma)
 elif case == 4 or case == 5:
@@ -135,9 +136,9 @@ common = {
     "snes_type": "ksponly",
     "ksp_type": "richardson",
     "ksp_norm_type": "unpreconditioned",
-    "ksp_rtol": 1.0e-6,
+    "ksp_rtol": 1.0e-10,
     "ksp_atol": 1.0e-10,
-    "ksp_max_it": 100,
+    "ksp_max_it": 500,
     "ksp_converged_reason": None,
     "ksp_monitor_true_residual": None,
 }
@@ -178,25 +179,60 @@ elif args.solver_type == "alamg":
 else:
     raise ValueError("please specify almg, allu or alamg for --solver-type")
 
-mu_fun= mu(mh[-1])
-
-# Solve Stoke's equation (assume that we're solving div(u) = 0)
-def aug_jacobian(X, J):
+def aug_jacobian(X, J, level):
     if case == 4 or case == 5:
-        J.axpy(1, BTWB, structure=J.Structure.SUBSET_NONZERO_PATTERN)
+        levelmesh = mh[level]
+        Vlevel = FunctionSpace(levelmesh, "BDM", k)
+        Qlevel = FunctionSpace(levelmesh, "DG", k-1)
+        Zlevel = Vlevel * Qlevel
+        # Get B
+        tmpu, tmpp = TrialFunctions(Zlevel)
+        tmpv, tmpq = TestFunctions(Zlevel)
+        tmpF = -tmpq * div(tmpu) * dx
+        tmpbcs = [DirichletBC(Zlevel.sub(0), Constant((0., 0.)), "on_boundary")]
+        tmpa = lhs(tmpF)
+        M = assemble(tmpa, bcs=tmpbcs)
+        Blevel = M.M[1, 0].handle
+
+        # Get W
+        ptrial = TrialFunction(Qlevel)
+        ptest  = TestFunction(Qlevel)
+        if case == 4:
+            Wlevel = assemble(Tensor(inner(ptrial, ptest)*dx).inv).M[0,0].handle
+        if case == 5:
+            Wlevel = assemble(Tensor(1.0/mu(levelmesh)*inner(ptrial, ptest)*\
+                    dx).inv).M[0,0].handle
+
+        # Form BTWB
+        BTWlevel = Blevel.transposeMatMult(Wlevel)
+        BTWlevel *= args.gamma
+        BTWBlevel = BTWlevel.matMult(Blevel)
+        J.axpy(1, BTWBlevel, structure=J.Structure.SUBSET_NONZERO_PATTERN)
+
+def modify_residual(X, F):
+    if case == 4 or case == 5:
+        vel_is = Z._ises[0]
+        pre_is = Z._ises[1]
+        Fvel = F.getSubVector(vel_is)
+        Xvel = X.getSubVector(vel_is)
+        Fvel += BTWB*Xvel
+        F.restoreSubVector(vel_is, Fvel)
     else:
         return
 
-problem = LinearVariationalProblem(a, l, sol, bcs=bcs)
-solver = LinearVariationalSolver(problem,
-                                 solver_parameters=params,
-                                 options_prefix="topleft_",
-                                 post_jacobian_callback=aug_jacobian)
+for i in range(args.itref+1):
+    problem = LinearVariationalProblem(a, l, sol, bcs=bcs)
+    solver = LinearVariationalSolver(problem,
+                                     solver_parameters=params,
+                                     options_prefix="topleft_",
+                                     post_jacobian_callback=aug_jacobian, 
+                                     post_function_callback=modify_residual)
+    solver.solve()
+    if case <= 4:
+        with assemble(action(Fgamma, sol), bcs=homogenize(bcs)).dat.vec_ro as v:
+            print('Relative residual with    grad-div', v.norm()/norm(sol))
 
-# Write out solution
-solver.solve()
+    # Write out solution
 File("u.pvd").write(sol)
-
-
 # if Z.dim() > 1e4 or mesh.mpi_comm().size > 1:
 #     import sys; sys.exit()
