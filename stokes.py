@@ -128,22 +128,6 @@ F += divrhs * q * dx(degree=2*(k-1))
 Fgamma = F + Constant(gamma)*inner((div(u)-divrhs), div(v))*dx(degree=2*(k-1))
 
 if case < 4:
-    # # Case 1,2,3:
-    # a = lhs(F)
-    # M = assemble(a, bcs=bcs)
-    # A = M.M[0, 0].handle
-    # B = M.M[1, 0].handle
-    # ptrial = TrialFunction(Q)
-    # ptest = TestFunction(Q)
-    # W  = assemble(Tensor(inner(ptrial, ptest)*dx).inv).M[0,0].handle
-    # BTW = B.transposeMatMult(W)
-    # BTW *= args.gamma
-    # BTWB = BTW.matMult(B)
-    # # Check the correctness of BTWB (should be equal to A2-A)
-    # F += gamma*inner(div(u), div(v))*dx
-    # M2 = assemble(lhs(F), bcs=bcs)
-    # A2 = M2.M[0, 0].handle
-    # print((A2 - A - BTWB).norm())
     a = lhs(Fgamma)
     l = rhs(Fgamma)
 elif case == 4:
@@ -229,7 +213,7 @@ params = {
     "ksp_type": "fgmres",
     "ksp_rtol": 1.0e-10,
     "ksp_atol": 1.0e-10,
-    "ksp_max_it": 300,
+    "ksp_max_it": 1000,
     "ksp_monitor_true_residual": None,
     "ksp_converged_reason": None,
     "pc_type": "fieldsplit",
@@ -269,7 +253,7 @@ mu_fun= mu(mh[-1])
 appctx = {"nu": mu_fun, "gamma": gamma, "dr":dr, "case":case}
 
 # Solve Stoke's equation
-def aug_jacobian(X, J):
+def aug_jacobian(X, J, level):
     if case == 4 or case == 5:
         nested_IS = J.getNestISs()
         Jsub = J.getLocalSubMatrix(nested_IS[0][0], nested_IS[0][0])
@@ -375,7 +359,6 @@ viscmassinv = viscmassinv.petscmat
 massinv = assemble(Tensor(-inner(pp, qq)*dx).inv)
 massinv = massinv.petscmat
 
-
 # Comparison -M_p(1/nu)^{-1}, -M_p^{-1}
 MpinvS   = np.matmul(massinv[:,:], S)
 eigval, eigvec = np.linalg.eig(MpinvS)
@@ -429,7 +412,6 @@ elif case == 5:
     Dmu = (args.gamma + 1/cmu)/(args.gamma + 1)
 else:
     raise ValueError("Unknown type of preconditioner %i" % case)
-
 ## Preconditioned system
 # Pinv
 if case == 3 or case == 4:
@@ -444,7 +426,7 @@ eigval, eigvec = np.linalg.eig(PinvSgamma)
 
 print("PinvSgamma: ")
 print("[", np.partition(eigval, 2)[1], ", ", max(eigval), "]")
-# np.save(f"eig-{args.case}-{args.gamma}-{args.dr}.npy", eigval)
+#np.save(f"eig-{args.case}-{args.gamma}-{args.dr}.npy", eigval)
 print("Estimation: 1/Dmu = ", 1.0/Dmu)
 if abs(dmu) > 1e-15:
     print("1/dmu = ", 1.0/dmu)
