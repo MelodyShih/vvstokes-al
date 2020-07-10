@@ -14,6 +14,7 @@ parser.add_argument("--dr", type=float, default=1e8)
 parser.add_argument("--N", type=int, default=10)
 parser.add_argument("--case", type=int, default=3)
 parser.add_argument("--itref", type=int, default=0)
+parser.add_argument("--nonzero-initial-guess", dest="nonzero_initial_guess", default=False, action="store_true")
 args, _ = parser.parse_known_args()
 
 
@@ -32,8 +33,12 @@ mh = MeshHierarchy(mesh, nref, reorder=True, distribution_parameters=distp)
 mesh = mh[-1]
 
 V = FunctionSpace(mesh, "BDM", k)
+#V = VectorFunctionSpace(mesh, "CG", k)
 Q = FunctionSpace(mesh, "DG", k-1)
 Z = V * Q
+
+print("dim(V) = ", V.dim())
+print("dim(Q) = ", Q.dim())
 
 sol = Function(V)
 u = TrialFunction(V)
@@ -71,10 +76,11 @@ def mu(mesh):
     Qm = FunctionSpace(mesh, Q.ufl_element())
     return Function(Qm).interpolate(mu_expr(mesh))
 
-File("mu.pvd").write(mu(mesh))
+#File("mu.pvd").write(mu(mesh))
 
 sigma = Constant(100.)
-h = CellSize(mesh)
+#h = CellSize(mesh)
+h = Constant(sqrt(2)/(N*(2**nref)))
 n = FacetNormal(mesh)
 
 def diffusion(u, v, mu):
@@ -134,9 +140,9 @@ else:
 
 common = {
     "snes_type": "ksponly",
-    "ksp_type": "richardson",
+    "ksp_type": "gmres",
     "ksp_norm_type": "unpreconditioned",
-    "ksp_rtol": 1.0e-10,
+    "ksp_rtol": 1.0e-6,
     "ksp_atol": 1.0e-10,
     "ksp_max_it": 500,
     "ksp_converged_reason": None,
@@ -163,6 +169,8 @@ mg_levels_solver = {
 solver_mg = {
     "pc_type": "mg",
     "pc_mg_type": "full",
+    #"pc_mg_type": "multiplicative",
+    #"pc_mg_cycle_type": "v",
     "mg_levels": mg_levels_solver,
     "mg_coarse_pc_type": "python",
     "mg_coarse_pc_python_type": "firedrake.AssembledPC",
@@ -183,6 +191,7 @@ def aug_jacobian(X, J, level):
     if case == 4 or case == 5:
         levelmesh = mh[level]
         Vlevel = FunctionSpace(levelmesh, "BDM", k)
+        #Vlevel = VectorFunctionSpace(levelmesh, "CG", k)
         Qlevel = FunctionSpace(levelmesh, "DG", k-1)
         Zlevel = Vlevel * Qlevel
         # Get B
@@ -220,13 +229,67 @@ def modify_residual(X, F):
     else:
         return
 
+if args.nonzero_initial_guess:
+    sol.project(Constant((1., 1.)))
+
+from firedrake.dmhooks import get_appctx
+def form(V):
+    a = get_appctx(V.dm).J
+    return a
+
+def energy_norm(u):
+    return assemble(action(action(form(u.function_space()), u), u))
+
+from enum import IntEnum
+class Op(IntEnum):
+    PROLONG = 0
+    RESTRICT = 1
+    INJECT = 2
+
+class MyTransferManager(TransferManager):
+    def prolong(self, uc, uf):
+        """Prolong a function.
+
+        :arg uc: The source (coarse grid) function.
+        :arg uf: The target (fine grid) function.
+        """
+        print("From mesh %i to %i" % (uc.function_space().dim(), uf.function_space().dim()))
+        #print("energy_norm(u_H)   ", energy_norm(uc))
+        super().prolong(uc,uf)
+        #print("energy_norm(P_hu_H)", energy_norm(uf))
+        #print("energy ratio:")
+        print("   energy ratio:  ", energy_norm(uf)/energy_norm(uc))
+        #print()
+
+    def inject(self, uf, uc):
+        """Inject a function (primal restriction)
+
+        :arg uf: The source (fine grid) function.
+        :arg uc: The target (coarse grid) function.
+        """
+        if get_appctx(uc.function_space().dm) is not None:
+            print("From mesh %i to %i" % (uf.function_space().dim(), uc.function_space().dim()))
+            print("energy_norm(u_h)   ", energy_norm(uf))
+            super().inject(uf,uc)
+            print("energy_norm(I_Hu_h)", energy_norm(uc))
+            print("energy ratio:")
+            if abs(energy_norm(uf))<1e-15:
+                print("   nan")
+            else:
+                print("  ", energy_norm(uc)/energy_norm(uf))
+            print()
+        else:
+            super().inject(uf,uc)
+
 for i in range(args.itref+1):
+    transfer = MyTransferManager()
     problem = LinearVariationalProblem(a, l, sol, bcs=bcs)
     solver = LinearVariationalSolver(problem,
                                      solver_parameters=params,
                                      options_prefix="topleft_",
                                      post_jacobian_callback=aug_jacobian, 
                                      post_function_callback=modify_residual)
+    solver.set_transfer_manager(transfer)
     solver.solve()
     if case <= 4:
         with assemble(action(Fgamma, sol), bcs=homogenize(bcs)).dat.vec_ro as v:
