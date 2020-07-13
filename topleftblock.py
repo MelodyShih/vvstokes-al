@@ -39,7 +39,7 @@ if args.discretisation == "hdiv":
 elif args.discretisation == "cg":
     assert k == 2, "only k=2 is implemented"
     V = VectorFunctionSpace(mesh, "CG", k)
-    Q = FunctionSpace(mesh, "DG", k-1)
+    Q = FunctionSpace(mesh, "DG", k-2)
 else:
     raise ValueError("please specify hdiv or cg for --discretisation")
     
@@ -112,7 +112,13 @@ for bc in bcs:
     F += nitsche(u, v, mu_expr(mesh), bid, g)
 
 F += -10 * (chi_n(mesh)-1)*v[1] * dx
-Fgamma = F + gamma*inner(cell_avg(div(u)), div(v))*dx
+if args.discretisation == "hdiv":
+    Fgamma = F + gamma*inner(div(u), div(v))*dx
+elif args.discretisation == "cg":
+    assert k == 2, "only k=2 is implemented"
+    Fgamma = F + gamma*inner(cell_avg(div(u)), div(v))*dx
+else:
+    raise ValueError("please specify hdiv or cg for --discretisation")
 
 if case < 4:
     a = lhs(Fgamma)
@@ -198,9 +204,15 @@ else:
 def aug_jacobian(X, J, level):
     if case == 4 or case == 5:
         levelmesh = mh[level]
-        Vlevel = FunctionSpace(levelmesh, "BDM", k)
-        #Vlevel = VectorFunctionSpace(levelmesh, "CG", k)
-        Qlevel = FunctionSpace(levelmesh, "DG", k-1)
+        if args.discretisation == "hdiv":
+            Vlevel = FunctionSpace(mesh, "BDM", k)
+            Qlevel = FunctionSpace(mesh, "DG", k-1)
+        elif args.discretisation == "cg":
+            assert k == 2, "only k=2 is implemented"
+            Vlevel = VectorFunctionSpace(mesh, "CG", k)
+            Qlevel = FunctionSpace(mesh, "DG", k-2)
+        else:
+            raise ValueError("please specify hdiv or cg for --discretisation")
         Zlevel = Vlevel * Qlevel
         # Get B
         tmpu, tmpp = TrialFunctions(Zlevel)

@@ -46,7 +46,7 @@ else:
         Q = FunctionSpace(mesh, "DG", k-1)
     elif args.discretisation == "cg":
         assert k == 2, "only k=2 is implemented"
-        V = FunctionSpace(mesh, "BDM", k)
+        V = VectorFunctionSpace(mesh, "CG", k)
         Q = FunctionSpace(mesh, "DG", k-2)
     else:
         raise ValueError("please specify hdiv or cg for --discretisation")
@@ -137,7 +137,13 @@ else:
     divrhs = Constant(0)
 F += divrhs * q * dx(degree=2*(k-1))
 
-Fgamma = F + Constant(gamma)*inner(cell_avg(div(u)-divrhs), div(v))*dx(degree=2*(k-1))
+if args.discretisation == "hdiv":
+    Fgamma = F + Constant(gamma)*inner(div(u)-divrhs, div(v))*dx(degree=2*(k-1))
+elif args.discretisation == "cg":
+    assert k == 2, "only k=2 is implemented"
+    Fgamma = F + Constant(gamma)*inner(cell_avg(div(u))-divrhs, cell_avg(div(v)))*dx(degree=2*(k-1))
+else:
+    raise ValueError("please specify hdiv or cg for --discretisation")
 
 if case < 4:
     a = lhs(Fgamma)
@@ -202,11 +208,12 @@ fieldsplit_1 = {
     "pc_python_type": "schurcomplement.DGMassInv"
 }
 
+
 fieldsplit_0_lu = {
     "ksp_type": "preonly",
     "ksp_max_it": 1,
     "pc_type": "lu",
-    "pc_factor_mat_solver_type": "superlu_dist",
+    #"pc_factor_mat_solver_type": "superlu_dist",
 }
 
 fieldsplit_0_hypre = {
@@ -284,13 +291,50 @@ appctx = {"nu": mu_fun, "gamma": gamma, "dr":dr, "case":case, "w":w}
 
 # Solve Stoke's equation
 def aug_jacobian(X, J, level):
-    if case == 4 or case == 5 or case == 6:
+    if case == 4 or case == 5:
+        print(level)
+        levelmesh = mh[level]
+        if args.discretisation == "hdiv":
+            Vlevel = FunctionSpace(mesh, "BDM", k)
+            Qlevel = FunctionSpace(mesh, "DG", k-1)
+        elif args.discretisation == "cg":
+            assert k == 2, "only k=2 is implemented"
+            Vlevel = VectorFunctionSpace(mesh, "CG", k)
+            Qlevel = FunctionSpace(mesh, "DG", k-2)
+        else:
+            raise ValueError("please specify hdiv or cg for --discretisation")
+        Zlevel = Vlevel * Qlevel
+        # Get B
+        tmpu, tmpp = TrialFunctions(Zlevel)
+        tmpv, tmpq = TestFunctions(Zlevel)
+        tmpF = -tmpq * div(tmpu) * dx
+        tmpbcs = [DirichletBC(Zlevel.sub(0), Constant((0., 0.)), "on_boundary")]
+        tmpa = lhs(tmpF)
+        M = assemble(tmpa, bcs=tmpbcs)
+        Blevel = M.M[1, 0].handle
+
+        # Get W
+        ptrial = TrialFunction(Qlevel)
+        ptest  = TestFunction(Qlevel)
+        if case == 4:
+            Wlevel = assemble(Tensor(inner(ptrial, ptest)*dx).inv).M[0,0].handle
+        if case == 5:
+            Wlevel = assemble(Tensor(1.0/mu(levelmesh)*inner(ptrial, ptest)*\
+                    dx).inv).M[0,0].handle
+
+        # Form BTWB
+        BTWlevel = Blevel.transposeMatMult(Wlevel)
+        BTWlevel *= args.gamma
+        BTWBlevel = BTWlevel.matMult(Blevel)
+
         nested_IS = J.getNestISs()
         Jsub = J.getLocalSubMatrix(nested_IS[0][0], nested_IS[0][0])
         Jsub.axpy(1, BTWB, structure=Jsub.Structure.SUBSET_NONZERO_PATTERN)
+        #Jsub.axpy(1, BTWB)
         J.restoreLocalSubMatrix(nested_IS[0][0], nested_IS[0][0], Jsub)
-    else:
-        return
+    elif case == 6:
+        raise ValueError("Augmented Jacobian (case %d) not implemented yet" % case)
+
 
 def modify_residual(X, F):
     if case == 4 or case == 5 or case == 6:
@@ -305,7 +349,7 @@ def modify_residual(X, F):
         return
 
 nsp = MixedVectorSpaceBasis(Z, [Z.sub(0), VectorSpaceBasis(constant=True)])
-# nsp = MixedVectorSpaceBasis(Z, [Z[0], VectorSpaceBasis(vecs=[assemble( (1/mu) * TestFunction(Q)]))
+
 if args.nonzero_initial_guess:
     z.split()[0].project(Constant((1., 1.)))
     z.split()[1].interpolate(SpatialCoordinate(mesh)[1]-2)
@@ -327,7 +371,6 @@ for i in range(args.itref+1):
     with assemble(action(F, z), bcs=homogenize(bcs)).dat.vec_ro as w:
         print('Residual without grad-div', w.norm())
 
-File("u.pvd").write(z.split()[0])
 # uncomment lines below to write out the solution. then run with --case 3 first
 # and then with --case 4 after to make sure that the 'manual/triple matrix
 # product' augmented lagrangian implementation does the same thing as the
@@ -348,155 +391,3 @@ File("u.pvd").write(z.split()[0])
 
 # if Z.dim() > 1e4 or mesh.mpi_comm().size > 1:
 #     import sys; sys.exit()
-
-""" Demo on how to get the assembled """
-# M = assemble(a, bcs=bcs)
-# A = M.M[0, 0].handle # A is now a PETSc Mat type
-# B = M.M[1, 0].handle
-
-"""
-# Eigenvalue analysis
-M = assemble(a, bcs=bcs)
-Agamma = M.M[0, 0].handle # A is now a PETSc Mat type
-B      = M.M[1, 0].handle
-if case == 4 or case == 5:
-    Agammanp = Agamma[:,:] + 0.5*(BTWB[:,:] + BTWB.transpose()[:,:])
-else:
-    Agammanp = Agamma[:, :] # obtain a dense numpy matrix
-Bnp      = B[:, :]
-
-## Schur complement of original Sgamma
-Sgamma = -np.matmul(np.matmul(Bnp, np.linalg.inv(Agammanp)), Bnp.transpose())
-
-## Schur complement of original S
-# Form -BTAinvB
-M = assemble(lhs(F), bcs=bcs)
-A = M.M[0, 0].handle
-Anp = A[:, :] # obtain a dense numpy matrix
-S = -np.matmul(np.matmul(Bnp, np.linalg.inv(Anp)), Bnp.transpose())
-
-## Preconditioner of Sgamma
-pp = TrialFunction(Q)
-qq = TestFunction(Q)
-
-#-M_p(1/nu)^{-1}
-viscmass    = assemble(Tensor(-1.0/mu_fun*inner(pp, qq)*dx))
-viscmassinv = assemble(Tensor(-1.0/mu_fun*inner(pp, qq)*dx).inv)
-viscmass    = viscmass.petscmat
-viscmassinv = viscmassinv.petscmat
-
-#-M_p
-massinv = assemble(Tensor(-inner(pp, qq)*dx).inv)
-massinv = massinv.petscmat
-"""
-"""
-# Comparison -M_p(1/nu)^{-1}, -M_p^{-1}
-MpinvS   = np.matmul(massinv[:,:], S)
-eigval, eigvec = np.linalg.eig(MpinvS)
-print("-Mp: ")
-print("[", np.partition(eigval, 2)[1], ", ", max(eigval), "]")
-Amu = max(eigval)
-amu = np.partition(eigval, 2)[1]
-print("Amu = ", Amu)
-print("amu = ", amu)
-print("MpinvS: ", (args.gamma + 1)/(args.gamma + 1/amu), (args.gamma + 1)/(args.gamma + 1/Amu))
-
-MpmuinvS = np.matmul(viscmassinv[:,:], S)
-eigval, eigvec = np.linalg.eig(MpmuinvS)
-print("-Mp(1/mu): ")
-print("[", np.partition(eigval, 2)[1], ", ", max(eigval), "]")
-Cmu = max(eigval)
-cmu = np.partition(eigval, 2)[1]
-cmu = np.real(cmu)
-print("Cmu = ", Cmu)
-print("cmu = ", cmu)
-print("MpmuinvS: ", (args.gamma + 1)/(args.gamma + 1/cmu), (args.gamma + 1)/(args.gamma + 1/Cmu))
-
-## Finding a
-# MpinvMpmu = np.matmul(massinv[:,:], viscmass[:,:])
-# eigval, eigvec = np.linalg.eig(MpinvMpmu)
-# print("MpinvMp(1/mu): ")
-# print("[", min(eigval), ", ", max(eigval), "]")
-# print("optimal 1/a:", 1.0/min(eigval))
-# a = min(eigval)
-
-a = 1/dr**0.5
-A = dr**0.5
-
-if case == 3 or case == 4:
-    print("1/a = ", 1.0/a, "gamma = ", args.gamma)
-    dmu = 1 - 1.0/a/args.gamma
-    w = (1+a*cmu*args.gamma)/(1+a*args.gamma)
-    print("(1+acmugamma)/(1+agamma)", w)
-    # w = 0.9
-    # T = 1/cmu*w*viscmassinv[:,:] + (1/(a*cmu)*(1-w)+args.gamma)*massinv[:,:]
-    # TinvMmu = np.matmul(T, Sgamma)
-    # eigval, eigvec = np.linalg.eig(TinvMmu)
-    # print("Eq(27)")
-    # print("[", np.partition(eigval, 2)[1], ", ", max(eigval), "]")
-
-    Dmu = 1 + (1 - w)/(a*cmu*args.gamma)
-    print("1/Dmu = ", 1.0/Dmu)
-    Dmuinv = 1.0/(1/cmu + args.gamma/a) + 1.0/(1+1.0/amu/args.gamma)
-    print("Florian 1/Dmu = ", Dmuinv)
-    print("dmu = ", dmu)
-elif case == 5:
-    dmu = (args.gamma + 1/Cmu)/(args.gamma + 1)
-    Dmu = (args.gamma + 1/cmu)/(args.gamma + 1)
-else:
-    raise ValueError("Unknown type of preconditioner %i" % case)
-"""
-"""
-## Preconditioned system
-# Pinv
-if case == 3 or case == 4:
-    Pinv = viscmassinv[:,:] + args.gamma*massinv[:,:]
-elif case == 5:
-    Pinv = (1.0 + args.gamma)*viscmassinv[:,:]
-else:
-    raise ValueError("Unknown type of preconditioner %i" % case)
-
-PinvSgamma = np.matmul(Pinv, Sgamma)
-eigval, eigvec = np.linalg.eig(PinvSgamma)
-argsorteigval = np.argsort(eigval)
-
-## Plot eigenvectors
-eigvecQ = FunctionSpace(mesh, "DG", k-1)
-e = Function(eigvecQ)
-print(eigval[argsorteigval[1]])
-print(np.linalg.norm(np.real(eigvec[:,argsorteigval[1]])))
-#e.dat.data[:] = np.matmul(massinv[:,:],np.real(eigvec[:, argsorteigval[1]]))
-aaa = np.matmul(massinv[:,:],np.real(eigvec[:, argsorteigval[1]]))
-e.dat.data[:] = aaa
-File(f"e-5-{args.gamma}-1.pvd").write(e)
-
-print(eigval[argsorteigval[2]])
-print(np.linalg.norm(np.real(eigvec[:,argsorteigval[2]])))
-e.dat.data[:] = np.matmul(massinv[:,:],np.real(eigvec[:, argsorteigval[2]]))
-#e.dat.data[:] = np.real(eigvec[:, argsorteigval[2]])
-aaa = np.matmul(massinv[:,:],np.real(eigvec[:, argsorteigval[2]]))
-e.dat.data[:] = aaa
-File(f"e-5-{args.gamma}-2.pvd").write(e)
-
-print(eigval[argsorteigval[3]])
-print(np.linalg.norm(np.real(eigvec[:,argsorteigval[3]])))
-e.dat.data[:] = np.matmul(massinv[:,:],np.real(eigvec[:, argsorteigval[3]]))
-#e.dat.data[:] = np.real(eigvec[:, argsorteigval[3]])
-aaa = np.matmul(massinv[:,:],np.real(eigvec[:, argsorteigval[3]]))
-e.dat.data[:] = aaa
-File(f"e-5-{args.gamma}-3.pvd").write(e)
-
-print(eigval[argsorteigval[4]])
-print(np.linalg.norm(np.real(eigvec[:,argsorteigval[4]])))
-e.dat.data[:] = np.matmul(massinv[:,:],np.real(eigvec[:, argsorteigval[4]]))
-#e.dat.data[:] = np.real(eigvec[:, argsorteigval[4]])
-File(f"e-5-{args.gamma}-4.pvd").write(e)
-#
-#print("PinvSgamma: ")
-#print("[", np.partition(eigval, 2)[1], ", ", max(eigval), "]")
-##np.save(f"eig-{args.case}-{args.gamma}-{args.dr}.npy", eigval)
-"""
-"""
-print("Estimation: 1/Dmu = ", 1.0/Dmu)
-if abs(dmu) > 1e-15:
-    print("1/dmu = ", 1.0/dmu)
