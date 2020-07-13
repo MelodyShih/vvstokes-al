@@ -2,3 +2,6 @@ __pycache__/*
 *.pvd
 *.vtu
 *.pvtu
+*.npy
+*.dat
+*.png

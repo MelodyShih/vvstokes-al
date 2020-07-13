@@ -17,6 +17,7 @@ parser.add_argument("--nonzero-rhs", dest="nonzero_rhs", default=False, action="
 parser.add_argument("--nonzero-initial-guess", dest="nonzero_initial_guess", default=False, action="store_true")
 parser.add_argument("--quad", dest="quad", default=False, action="store_true")
 parser.add_argument("--itref", type=int, default=0)
+parser.add_argument("--w", type=float, default=0.0)
 args, _ = parser.parse_known_args()
 
 
@@ -25,6 +26,7 @@ dr = args.dr
 k = args.k
 N = args.N
 case = args.case
+w = args.w
 gamma = Constant(args.gamma)
 
 distp = {"partition": True, "overlap_type": (DistributedMeshOverlapType.VERTEX, 1)}
@@ -161,6 +163,24 @@ elif case == 5:
     BTW = B.transposeMatMult(W)
     BTW *= args.gamma
     BTWB = BTW.matMult(B)
+
+elif case == 6:
+    # Unaugmented system
+    a = lhs(F)
+    l = rhs(F)
+
+    # Form BTWB
+    M = assemble(a, bcs=bcs)
+    A = M.M[0, 0].handle
+    B = M.M[1, 0].handle
+    ptrial = TrialFunction(Q)
+    ptest  = TestFunction(Q)
+    W1 = assemble(Tensor(1.0/mu(mh[-1])*inner(ptrial, ptest)*dx).inv).M[0,0].handle
+    W2 = assemble(Tensor(inner(ptrial, ptest)*dx).inv).M[0,0].handle
+    W = W1*w + W2*(1-w)
+    BTW = B.transposeMatMult(W)
+    BTW *= args.gamma
+    BTWB = BTW.matMult(B)
 else:
     raise ValueError("Unknown type of preconditioner %i" % case)
 
@@ -250,11 +270,11 @@ else:
     raise ValueError("please specify almg, allu or alamg for --solver-type")
 
 mu_fun= mu(mh[-1])
-appctx = {"nu": mu_fun, "gamma": gamma, "dr":dr, "case":case}
+appctx = {"nu": mu_fun, "gamma": gamma, "dr":dr, "case":case, "w":w}
 
 # Solve Stoke's equation
 def aug_jacobian(X, J, level):
-    if case == 4 or case == 5:
+    if case == 4 or case == 5 or case == 6:
         nested_IS = J.getNestISs()
         Jsub = J.getLocalSubMatrix(nested_IS[0][0], nested_IS[0][0])
         Jsub.axpy(1, BTWB, structure=Jsub.Structure.SUBSET_NONZERO_PATTERN)
@@ -263,7 +283,7 @@ def aug_jacobian(X, J, level):
         return
 
 def modify_residual(X, F):
-    if case == 4 or case == 5:
+    if case == 4 or case == 5 or case == 6:
         vel_is = Z._ises[0]
         pre_is = Z._ises[1]
         Fvel = F.getSubVector(vel_is)
