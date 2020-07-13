@@ -18,6 +18,7 @@ parser.add_argument("--nonzero-initial-guess", dest="nonzero_initial_guess", def
 parser.add_argument("--quad", dest="quad", default=False, action="store_true")
 parser.add_argument("--itref", type=int, default=0)
 parser.add_argument("--w", type=float, default=0.0)
+parser.add_argument("--discretisation", type=str, default="hdiv")
 args, _ = parser.parse_known_args()
 
 
@@ -40,8 +41,16 @@ if args.quad:
     V = FunctionSpace(mesh, "RTCF", k)
     Q = FunctionSpace(mesh, "DQ", k-1)
 else:
-    V = FunctionSpace(mesh, "BDM", k)
-    Q = FunctionSpace(mesh, "DG", k-1)
+    if args.discretisation == "hdiv":
+        V = FunctionSpace(mesh, "BDM", k)
+        Q = FunctionSpace(mesh, "DG", k-1)
+    elif args.discretisation == "cg":
+        V = FunctionSpace(mesh, "BDM", k)
+        Q = FunctionSpace(mesh, "DG", k-1)
+    else:
+        raise ValueError("please specify hdiv or cg for --discretisation")
+
+
 Z = V * Q
 print("dim(Z) = ", Z.dim())
 print("dim(V) = ", V.dim())
@@ -127,7 +136,7 @@ else:
     divrhs = Constant(0)
 F += divrhs * q * dx(degree=2*(k-1))
 
-Fgamma = F + Constant(gamma)*inner((div(u)-divrhs), div(v))*dx(degree=2*(k-1))
+Fgamma = F + Constant(gamma)*inner(avg(div(u)-divrhs), div(v))*dx(degree=2*(k-1))
 
 if case < 4:
     a = lhs(Fgamma)
@@ -317,7 +326,7 @@ for i in range(args.itref+1):
     with assemble(action(F, z), bcs=homogenize(bcs)).dat.vec_ro as w:
         print('Residual without grad-div', w.norm())
 
-
+File("u.pvd").write(z.split()[0])
 # uncomment lines below to write out the solution. then run with --case 3 first
 # and then with --case 4 after to make sure that the 'manual/triple matrix
 # product' augmented lagrangian implementation does the same thing as the

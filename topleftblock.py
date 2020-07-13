@@ -15,6 +15,7 @@ parser.add_argument("--N", type=int, default=10)
 parser.add_argument("--case", type=int, default=3)
 parser.add_argument("--itref", type=int, default=0)
 parser.add_argument("--nonzero-initial-guess", dest="nonzero_initial_guess", default=False, action="store_true")
+parser.add_argument("--discretisation", type=str, default="hdiv")
 args, _ = parser.parse_known_args()
 
 
@@ -32,9 +33,15 @@ mh = MeshHierarchy(mesh, nref, reorder=True, distribution_parameters=distp)
 
 mesh = mh[-1]
 
-V = FunctionSpace(mesh, "BDM", k)
-#V = VectorFunctionSpace(mesh, "CG", k)
-Q = FunctionSpace(mesh, "DG", k-1)
+if args.discretisation == "hdiv":
+    V = FunctionSpace(mesh, "BDM", k)
+    Q = FunctionSpace(mesh, "DG", k-1)
+elif args.discretisation == "hdiv":
+    V = VectorFunctionSpace(mesh, "CG", k)
+    Q = FunctionSpace(mesh, "DG", k-1)
+else:
+    raise ValueError("please specify hdiv or cg for --discretisation")
+    
 Z = V * Q
 
 print("dim(V) = ", V.dim())
@@ -79,8 +86,8 @@ def mu(mesh):
 #File("mu.pvd").write(mu(mesh))
 
 sigma = Constant(100.)
-#h = CellSize(mesh)
-h = Constant(sqrt(2)/(N*(2**nref)))
+h = CellSize(mesh)
+#h = Constant(sqrt(2)/(N*(2**nref)))
 n = FacetNormal(mesh)
 
 def diffusion(u, v, mu):
@@ -104,7 +111,7 @@ for bc in bcs:
     F += nitsche(u, v, mu_expr(mesh), bid, g)
 
 F += -10 * (chi_n(mesh)-1)*v[1] * dx
-Fgamma = F + gamma*inner(div(u), div(v))*dx
+Fgamma = F + gamma*inner(avg(div(u)), div(v))*dx
 
 if case < 4:
     a = lhs(Fgamma)
