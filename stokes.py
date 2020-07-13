@@ -378,7 +378,8 @@ viscmassinv = viscmassinv.petscmat
 #-M_p
 massinv = assemble(Tensor(-inner(pp, qq)*dx).inv)
 massinv = massinv.petscmat
-
+"""
+"""
 # Comparison -M_p(1/nu)^{-1}, -M_p^{-1}
 MpinvS   = np.matmul(massinv[:,:], S)
 eigval, eigvec = np.linalg.eig(MpinvS)
@@ -425,13 +426,17 @@ if case == 3 or case == 4:
     # print("[", np.partition(eigval, 2)[1], ", ", max(eigval), "]")
 
     Dmu = 1 + (1 - w)/(a*cmu*args.gamma)
-    print("Dmu = ", Dmu)
+    print("1/Dmu = ", 1.0/Dmu)
+    Dmuinv = 1.0/(1/cmu + args.gamma/a) + 1.0/(1+1.0/amu/args.gamma)
+    print("Florian 1/Dmu = ", Dmuinv)
     print("dmu = ", dmu)
 elif case == 5:
     dmu = (args.gamma + 1/Cmu)/(args.gamma + 1)
     Dmu = (args.gamma + 1/cmu)/(args.gamma + 1)
 else:
     raise ValueError("Unknown type of preconditioner %i" % case)
+"""
+"""
 ## Preconditioned system
 # Pinv
 if case == 3 or case == 4:
@@ -443,11 +448,45 @@ else:
 
 PinvSgamma = np.matmul(Pinv, Sgamma)
 eigval, eigvec = np.linalg.eig(PinvSgamma)
+argsorteigval = np.argsort(eigval)
 
-print("PinvSgamma: ")
-print("[", np.partition(eigval, 2)[1], ", ", max(eigval), "]")
-#np.save(f"eig-{args.case}-{args.gamma}-{args.dr}.npy", eigval)
+## Plot eigenvectors
+eigvecQ = FunctionSpace(mesh, "DG", k-1)
+e = Function(eigvecQ)
+print(eigval[argsorteigval[1]])
+print(np.linalg.norm(np.real(eigvec[:,argsorteigval[1]])))
+#e.dat.data[:] = np.matmul(massinv[:,:],np.real(eigvec[:, argsorteigval[1]]))
+aaa = np.matmul(massinv[:,:],np.real(eigvec[:, argsorteigval[1]]))
+e.dat.data[:] = aaa
+File(f"e-5-{args.gamma}-1.pvd").write(e)
+
+print(eigval[argsorteigval[2]])
+print(np.linalg.norm(np.real(eigvec[:,argsorteigval[2]])))
+e.dat.data[:] = np.matmul(massinv[:,:],np.real(eigvec[:, argsorteigval[2]]))
+#e.dat.data[:] = np.real(eigvec[:, argsorteigval[2]])
+aaa = np.matmul(massinv[:,:],np.real(eigvec[:, argsorteigval[2]]))
+e.dat.data[:] = aaa
+File(f"e-5-{args.gamma}-2.pvd").write(e)
+
+print(eigval[argsorteigval[3]])
+print(np.linalg.norm(np.real(eigvec[:,argsorteigval[3]])))
+e.dat.data[:] = np.matmul(massinv[:,:],np.real(eigvec[:, argsorteigval[3]]))
+#e.dat.data[:] = np.real(eigvec[:, argsorteigval[3]])
+aaa = np.matmul(massinv[:,:],np.real(eigvec[:, argsorteigval[3]]))
+e.dat.data[:] = aaa
+File(f"e-5-{args.gamma}-3.pvd").write(e)
+
+print(eigval[argsorteigval[4]])
+print(np.linalg.norm(np.real(eigvec[:,argsorteigval[4]])))
+e.dat.data[:] = np.matmul(massinv[:,:],np.real(eigvec[:, argsorteigval[4]]))
+#e.dat.data[:] = np.real(eigvec[:, argsorteigval[4]])
+File(f"e-5-{args.gamma}-4.pvd").write(e)
+#
+#print("PinvSgamma: ")
+#print("[", np.partition(eigval, 2)[1], ", ", max(eigval), "]")
+##np.save(f"eig-{args.case}-{args.gamma}-{args.dr}.npy", eigval)
+"""
+"""
 print("Estimation: 1/Dmu = ", 1.0/Dmu)
 if abs(dmu) > 1e-15:
     print("1/dmu = ", 1.0/dmu)
-"""
