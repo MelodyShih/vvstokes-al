@@ -45,8 +45,9 @@ else:
         V = FunctionSpace(mesh, "BDM", k)
         Q = FunctionSpace(mesh, "DG", k-1)
     elif args.discretisation == "cg":
+        assert k == 2, "only k=2 is implemented"
         V = FunctionSpace(mesh, "BDM", k)
-        Q = FunctionSpace(mesh, "DG", k-1)
+        Q = FunctionSpace(mesh, "DG", k-2)
     else:
         raise ValueError("please specify hdiv or cg for --discretisation")
 

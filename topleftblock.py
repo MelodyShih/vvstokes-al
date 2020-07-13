@@ -36,7 +36,8 @@ mesh = mh[-1]
 if args.discretisation == "hdiv":
     V = FunctionSpace(mesh, "BDM", k)
     Q = FunctionSpace(mesh, "DG", k-1)
-elif args.discretisation == "hdiv":
+elif args.discretisation == "cg":
+    assert k == 2, "only k=2 is implemented"
     V = VectorFunctionSpace(mesh, "CG", k)
     Q = FunctionSpace(mesh, "DG", k-1)
 else:
