@@ -137,7 +137,7 @@ else:
     divrhs = Constant(0)
 F += divrhs * q * dx(degree=2*(k-1))
 
-Fgamma = F + Constant(gamma)*inner(avg(div(u)-divrhs), div(v))*dx(degree=2*(k-1))
+Fgamma = F + Constant(gamma)*inner(cell_avg(div(u)-divrhs), div(v))*dx(degree=2*(k-1))
 
 if case < 4:
     a = lhs(Fgamma)

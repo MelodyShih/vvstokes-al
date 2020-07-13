@@ -112,7 +112,7 @@ for bc in bcs:
     F += nitsche(u, v, mu_expr(mesh), bid, g)
 
 F += -10 * (chi_n(mesh)-1)*v[1] * dx
-Fgamma = F + gamma*inner(avg(div(u)), div(v))*dx
+Fgamma = F + gamma*inner(cell_avg(div(u)), div(v))*dx
 
 if case < 4:
     a = lhs(Fgamma)
