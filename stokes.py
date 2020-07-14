@@ -1,4 +1,5 @@
 from firedrake import *
+from alfi.transfer import *
 from functools import reduce
 
 import argparse
@@ -31,9 +32,26 @@ w = args.w
 gamma = Constant(args.gamma)
 
 distp = {"partition": True, "overlap_type": (DistributedMeshOverlapType.VERTEX, 1)}
-mesh = RectangleMesh(N, N, 4, 4, distribution_parameters=distp, quadrilateral=args.quad)
 
-mh = MeshHierarchy(mesh, nref, reorder=True, distribution_parameters=distp)
+hierarchy = "uniform"
+def before(dm, i):
+     for p in range(*dm.getHeightStratum(1)):
+         dm.setLabelValue("prolongation", p, i+1)
+
+def after(dm, i):
+     for p in range(*dm.getHeightStratum(1)):
+         dm.setLabelValue("prolongation", p, i+2)
+
+def mesh_hierarchy(hierarchy, nref, callbacks, distribution_parameters):
+    baseMesh = RectangleMesh(N, N, 4, 4, distribution_parameters=distp, quadrilateral=args.quad)
+    if hierarchy == "uniform":
+        mh = MeshHierarchy(baseMesh, nref, reorder=True, callbacks=callbacks,
+                           distribution_parameters=distribution_parameters)
+    else:
+        raise NotImplementedError("Only know uniform for the hierarchy.")
+    return mh
+mh = mesh_hierarchy(hierarchy, nref, (before, after), distp)
+#mh = MeshHierarchy(mesh, nref, reorder=True, distribution_parameters=distp)
 
 mesh = mh[-1]
 
@@ -292,7 +310,6 @@ appctx = {"nu": mu_fun, "gamma": gamma, "dr":dr, "case":case, "w":w}
 # Solve Stoke's equation
 def aug_jacobian(X, J, level):
     if case == 4 or case == 5:
-        print(level)
         levelmesh = mh[level]
         if args.discretisation == "hdiv":
             Vlevel = FunctionSpace(mesh, "BDM", k)
@@ -348,6 +365,22 @@ def modify_residual(X, F):
     else:
         return
 
+def get_transfers():
+    V = Z.sub(0)
+    Q = Z.sub(1)
+    tdim = mesh.topological_dimension()
+    if args.discretisation == "hdiv":
+        transfers = {V.ufl_element(): (prolong, restrict, inject),
+                     Q.ufl_element(): (prolong, restrict, inject)}
+    elif args.discretisation == "cg":
+        vtransfer = PkP0SchoeberlTransfer((mu, gamma), tdim, hierarchy)
+        qtransfer = NullTransfer()
+        transfers = {V.ufl_element(): (vtransfer.prolong, restrict, inject),
+                     Q.ufl_element(): (prolong, restrict, qtransfer.inject)}
+    else:
+        raise ValueError("please specify hdiv or cg for --discretisation")
+    return transfers
+
 nsp = MixedVectorSpaceBasis(Z, [Z.sub(0), VectorSpaceBasis(constant=True)])
 
 if args.nonzero_initial_guess:
@@ -364,6 +397,8 @@ for i in range(args.itref+1):
                                      post_function_callback=modify_residual,
                                      appctx=appctx, nullspace=nsp)
 
+    transfermanager = TransferManager(native_transfers=get_transfers())
+    solver.set_transfer_manager(transfermanager)
     # Write out solution
     solver.solve()
     with assemble(action(Fgamma, z), bcs=homogenize(bcs)).dat.vec_ro as v:
