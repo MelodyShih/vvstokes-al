@@ -137,7 +137,7 @@ else:
     divrhs = Constant(0)
 F += divrhs * q * dx(degree=2*(k-1))
 
-Fgamma = F + Constant(gamma)*inner(cell_avg(div(u))-divrhs, div(v))*dx(degree=2*(k-1))
+Fgamma = F + Constant(gamma)*inner(div(u)-divrhs, div(v))*dx(degree=2*(k-1))
 
 if case < 4:
     a = lhs(Fgamma)
@@ -260,22 +260,22 @@ a = 1/dr**0.5
 A = dr**0.5
 
 if case == 3 or case == 4:
-    print("1/a = ", 1.0/a, "gamma = ", args.gamma)
-    dmu = 1 - 1.0/a/args.gamma
-    w = (1+a*cmu*args.gamma)/(1+a*args.gamma)
-    print("(1+acmugamma)/(1+agamma)", w)
-    # w = 0.9
-    # T = 1/cmu*w*viscmassinv[:,:] + (1/(a*cmu)*(1-w)+args.gamma)*massinv[:,:]
-    # TinvMmu = np.matmul(T, Sgamma)
-    # eigval, eigvec = np.linalg.eig(TinvMmu)
-    # print("Eq(27)")
-    # print("[", np.partition(eigval, 2)[1], ", ", max(eigval), "]")
+    if args.gamma > 1e-15:
+        print("1/a = ", 1.0/a, "gamma = ", args.gamma)
+        dmu = 1 - 1.0/a/args.gamma
+        w = (1+a*cmu*args.gamma)/(1+a*args.gamma)
+        #print("(1+acmugamma)/(1+agamma)", w)
+        # w = 0.9
+        # T = 1/cmu*w*viscmassinv[:,:] + (1/(a*cmu)*(1-w)+args.gamma)*massinv[:,:]
+        # TinvMmu = np.matmul(T, Sgamma)
+        # eigval, eigvec = np.linalg.eig(TinvMmu)
+        # print("Eq(27)")
+        # print("[", np.partition(eigval, 2)[1], ", ", max(eigval), "]")
 
-    Dmu = 1 + (1 - w)/(a*cmu*args.gamma)
-    print("1/Dmu = ", 1.0/Dmu)
-    Dmuinv = 1.0/(1/cmu + args.gamma/a) + 1.0/(1+1.0/amu/args.gamma)
-    print("Florian 1/Dmu = ", Dmuinv)
-    print("dmu = ", dmu)
+        Dmu = 1 + (1 - w)/(a*cmu*args.gamma)
+        Dmuinv1 = 1.0/(1/cmu + args.gamma/a) + 1.0/(1+1.0/amu/args.gamma) #(9)
+        Dmuinv2 = (1.0 + args.gamma/A)/(1.0/cmu + args.gamma/A) #(15)
+        dmuinv  = 1.0/(1/Cmu + args.gamma/A) + 1.0/(1.0+a/args.gamma) #(21)
 elif case == 5:
     dmu = (args.gamma + 1/Cmu)/(args.gamma + 1)
     Dmu = (args.gamma + 1/cmu)/(args.gamma + 1)
@@ -330,6 +330,10 @@ argsorteigval = np.argsort(eigval)
 print("PinvSgamma: ")
 print("[", np.partition(eigval, 2)[1], ", ", max(eigval), "]")
 ##np.save(f"eig-{args.case}-{args.gamma}-{args.dr}.npy", eigval)
-print("Estimation: 1/Dmu = ", 1.0/Dmu)
-if abs(dmu) > 1e-15:
-    print("1/dmu = ", 1.0/dmu)
+if args.gamma > 1e-15:
+    print("Estimation: 1/Dmu = ", 1.0/Dmu)
+    print("Estimation: (9)  = ", Dmuinv1)
+    print("Estimation: (15) = ", Dmuinv2)
+    print("Estimation: (21) = ", dmuinv)
+    if abs(dmu) > 1e-15:
+        print("1/dmu = ", 1.0/dmu)

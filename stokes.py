@@ -79,8 +79,8 @@ u, p = TrialFunctions(Z)
 v, q = TestFunctions(Z)
 bcs = [DirichletBC(Z.sub(0), Constant((0., 0.)), "on_boundary")]
 
-omega = 0.4 #0.4, 0.1
-delta = 10 #10, 200
+omega = 0.1 #0.4, 0.1
+delta = 200 #10, 200
 mu_min = Constant(dr**-0.5)
 mu_max = Constant(dr**0.5)
 
@@ -268,7 +268,7 @@ params = {
     "ksp_type": "fgmres",
     "ksp_rtol": 1.0e-10,
     "ksp_atol": 1.0e-10,
-    "ksp_max_it": 1000,
+    "ksp_max_it": 200,
     "ksp_monitor_true_residual": None,
     "ksp_converged_reason": None,
     "pc_type": "fieldsplit",
@@ -375,7 +375,7 @@ def get_transfers():
     elif args.discretisation == "cg":
         vtransfer = PkP0SchoeberlTransfer((mu, gamma), tdim, hierarchy)
         qtransfer = NullTransfer()
-        transfers = {V.ufl_element(): (vtransfer.prolong, restrict, inject),
+        transfers = {V.ufl_element(): (vtransfer.prolong, vtransfer.restrict, inject),
                      Q.ufl_element(): (prolong, restrict, qtransfer.inject)}
     else:
         raise ValueError("please specify hdiv or cg for --discretisation")
@@ -401,11 +401,13 @@ for i in range(args.itref+1):
     solver.set_transfer_manager(transfermanager)
     # Write out solution
     solver.solve()
-    with assemble(action(Fgamma, z), bcs=homogenize(bcs)).dat.vec_ro as v:
-        print('Residual with    grad-div', v.norm())
-    with assemble(action(F, z), bcs=homogenize(bcs)).dat.vec_ro as w:
-        print('Residual without grad-div', w.norm())
+    if case==3 or case==4:
+        with assemble(action(Fgamma, z), bcs=homogenize(bcs)).dat.vec_ro as v:
+            print('Residual with    grad-div', v.norm())
+        with assemble(action(F, z), bcs=homogenize(bcs)).dat.vec_ro as w:
+            print('Residual without grad-div', w.norm())
 
+#File("u.pvd").write(z.split()[0])
 # uncomment lines below to write out the solution. then run with --case 3 first
 # and then with --case 4 after to make sure that the 'manual/triple matrix
 # product' augmented lagrangian implementation does the same thing as the
