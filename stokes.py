@@ -346,8 +346,8 @@ def aug_jacobian(X, J, level):
 
         nested_IS = J.getNestISs()
         Jsub = J.getLocalSubMatrix(nested_IS[0][0], nested_IS[0][0])
-        Jsub.axpy(1, BTWB, structure=Jsub.Structure.SUBSET_NONZERO_PATTERN)
-        #Jsub.axpy(1, BTWB)
+        #Jsub.axpy(1, BTWB, structure=Jsub.Structure.SUBSET_NONZERO_PATTERN)
+        Jsub.axpy(1, BTWB)
         J.restoreLocalSubMatrix(nested_IS[0][0], nested_IS[0][0], Jsub)
     elif case == 6:
         raise ValueError("Augmented Jacobian (case %d) not implemented yet" % case)

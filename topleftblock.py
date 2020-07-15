@@ -1,4 +1,5 @@
 from firedrake import *
+from alfi.transfer import *
 from functools import reduce
 
 import argparse
@@ -27,9 +28,26 @@ case = args.case
 gamma = Constant(args.gamma)
 
 distp = {"partition": True, "overlap_type": (DistributedMeshOverlapType.VERTEX, 1)}
-mesh = RectangleMesh(N, N, 4, 4, distribution_parameters=distp)
 
-mh = MeshHierarchy(mesh, nref, reorder=True, distribution_parameters=distp)
+hierarchy = "uniform"
+def before(dm, i):
+     for p in range(*dm.getHeightStratum(1)):
+         dm.setLabelValue("prolongation", p, i+1)
+
+def after(dm, i):
+     for p in range(*dm.getHeightStratum(1)):
+         dm.setLabelValue("prolongation", p, i+2)
+
+def mesh_hierarchy(hierarchy, nref, callbacks, distribution_parameters):
+    baseMesh = RectangleMesh(N, N, 4, 4, distribution_parameters=distp)
+    if hierarchy == "uniform":
+        mh = MeshHierarchy(baseMesh, nref, reorder=True, callbacks=callbacks,
+                           distribution_parameters=distribution_parameters)
+    else:
+        raise NotImplementedError("Only know uniform for the hierarchy.")
+    return mh
+mh = mesh_hierarchy(hierarchy, nref, (before, after), distp)
+#mh = MeshHierarchy(mesh, nref, reorder=True, distribution_parameters=distp)
 
 mesh = mh[-1]
 
@@ -156,9 +174,9 @@ common = {
     "snes_type": "ksponly",
     "ksp_type": "gmres",
     "ksp_norm_type": "unpreconditioned",
-    "ksp_rtol": 1.0e-6,
+    "ksp_rtol": 1.0e-10,
     "ksp_atol": 1.0e-10,
-    "ksp_max_it": 500,
+    "ksp_max_it": 300,
     "ksp_converged_reason": None,
     "ksp_monitor_true_residual": None,
 }
@@ -202,15 +220,16 @@ else:
     raise ValueError("please specify almg, allu or alamg for --solver-type")
 
 def aug_jacobian(X, J, level):
+    print("level = %d"%level)
     if case == 4 or case == 5:
         levelmesh = mh[level]
         if args.discretisation == "hdiv":
-            Vlevel = FunctionSpace(mesh, "BDM", k)
-            Qlevel = FunctionSpace(mesh, "DG", k-1)
+            Vlevel = FunctionSpace(levelmesh, "BDM", k)
+            Qlevel = FunctionSpace(levelmesh, "DG", k-1)
         elif args.discretisation == "cg":
             assert k == 2, "only k=2 is implemented"
-            Vlevel = VectorFunctionSpace(mesh, "CG", k)
-            Qlevel = FunctionSpace(mesh, "DG", k-2)
+            Vlevel = VectorFunctionSpace(levelmesh, "CG", k)
+            Qlevel = FunctionSpace(levelmesh, "DG", k-2)
         else:
             raise ValueError("please specify hdiv or cg for --discretisation")
         Zlevel = Vlevel * Qlevel
@@ -252,70 +271,91 @@ def modify_residual(X, F):
 if args.nonzero_initial_guess:
     sol.project(Constant((1., 1.)))
 
-from firedrake.dmhooks import get_appctx
-def form(V):
-    a = get_appctx(V.dm).J
-    return a
+#from firedrake.dmhooks import get_appctx
+#def form(V):
+#    a = get_appctx(V.dm).J
+#    return a
+#
+#def energy_norm(u):
+#    return assemble(action(action(form(u.function_space()), u), u))
+#
+#from enum import IntEnum
+#class Op(IntEnum):
+#    PROLONG = 0
+#    RESTRICT = 1
+#    INJECT = 2
+#
+#class MyTransferManager(TransferManager):
+#    def prolong(self, uc, uf):
+#        """Prolong a function.
+#
+#        :arg uc: The source (coarse grid) function.
+#        :arg uf: The target (fine grid) function.
+#        """
+#        print("From mesh %i to %i" % (uc.function_space().dim(), uf.function_space().dim()))
+#        #print("energy_norm(u_H)   ", energy_norm(uc))
+#        super().prolong(uc,uf)
+#        #print("energy_norm(P_hu_H)", energy_norm(uf))
+#        #print("energy ratio:")
+#        print("   energy ratio:  ", energy_norm(uf)/energy_norm(uc))
+#        #print()
+#
+#    def inject(self, uf, uc):
+#        """Inject a function (primal restriction)
+#
+#        :arg uf: The source (fine grid) function.
+#        :arg uc: The target (coarse grid) function.
+#        """
+#        if get_appctx(uc.function_space().dm) is not None:
+#            print("From mesh %i to %i" % (uf.function_space().dim(), uc.function_space().dim()))
+#            print("energy_norm(u_h)   ", energy_norm(uf))
+#            super().inject(uf,uc)
+#            print("energy_norm(I_Hu_h)", energy_norm(uc))
+#            print("energy ratio:")
+#            if abs(energy_norm(uf))<1e-15:
+#                print("   nan")
+#            else:
+#                print("  ", energy_norm(uc)/energy_norm(uf))
+#            print()
+#        else:
+#            super().inject(uf,uc)
 
-def energy_norm(u):
-    return assemble(action(action(form(u.function_space()), u), u))
-
-from enum import IntEnum
-class Op(IntEnum):
-    PROLONG = 0
-    RESTRICT = 1
-    INJECT = 2
-
-class MyTransferManager(TransferManager):
-    def prolong(self, uc, uf):
-        """Prolong a function.
-
-        :arg uc: The source (coarse grid) function.
-        :arg uf: The target (fine grid) function.
-        """
-        print("From mesh %i to %i" % (uc.function_space().dim(), uf.function_space().dim()))
-        #print("energy_norm(u_H)   ", energy_norm(uc))
-        super().prolong(uc,uf)
-        #print("energy_norm(P_hu_H)", energy_norm(uf))
-        #print("energy ratio:")
-        print("   energy ratio:  ", energy_norm(uf)/energy_norm(uc))
-        #print()
-
-    def inject(self, uf, uc):
-        """Inject a function (primal restriction)
-
-        :arg uf: The source (fine grid) function.
-        :arg uc: The target (coarse grid) function.
-        """
-        if get_appctx(uc.function_space().dm) is not None:
-            print("From mesh %i to %i" % (uf.function_space().dim(), uc.function_space().dim()))
-            print("energy_norm(u_h)   ", energy_norm(uf))
-            super().inject(uf,uc)
-            print("energy_norm(I_Hu_h)", energy_norm(uc))
-            print("energy ratio:")
-            if abs(energy_norm(uf))<1e-15:
-                print("   nan")
-            else:
-                print("  ", energy_norm(uc)/energy_norm(uf))
-            print()
-        else:
-            super().inject(uf,uc)
+def get_transfers():
+    V = Z.sub(0)
+    Q = Z.sub(1)
+    tdim = mesh.topological_dimension()
+    if args.discretisation == "hdiv":
+        transfers = {V.ufl_element(): (prolong, restrict, inject),
+                     Q.ufl_element(): (prolong, restrict, inject)}
+    elif args.discretisation == "cg":
+        vtransfer = PkP0SchoeberlTransfer((mu, gamma), tdim, hierarchy)
+        qtransfer = NullTransfer()
+        transfers = {V.ufl_element(): (vtransfer.prolong, vtransfer.restrict, inject),
+                     Q.ufl_element(): (prolong, restrict, qtransfer.inject)}
+    else:
+        raise ValueError("please specify hdiv or cg for --discretisation")
+    return transfers
 
 for i in range(args.itref+1):
-    transfer = MyTransferManager()
     problem = LinearVariationalProblem(a, l, sol, bcs=bcs)
     solver = LinearVariationalSolver(problem,
                                      solver_parameters=params,
                                      options_prefix="topleft_",
                                      post_jacobian_callback=aug_jacobian, 
                                      post_function_callback=modify_residual)
-    solver.set_transfer_manager(transfer)
+
+    transfermanager = TransferManager(native_transfers=get_transfers())
+    solver.set_transfer_manager(transfermanager)
+    #transfer = MyTransferManager()
+    #solver.set_transfer_manager(transfer)
+
     solver.solve()
     if case <= 4:
         with assemble(action(Fgamma, sol), bcs=homogenize(bcs)).dat.vec_ro as v:
             print('Relative residual with    grad-div', v.norm()/norm(sol))
 
-    # Write out solution
+# Write out solution
 File("u.pvd").write(sol)
+
 # if Z.dim() > 1e4 or mesh.mpi_comm().size > 1:
 #     import sys; sys.exit()
