@@ -63,9 +63,8 @@ else:
         V = FunctionSpace(mesh, "BDM", k)
         Q = FunctionSpace(mesh, "DG", k-1)
     elif args.discretisation == "cg":
-        assert k == 2, "only k=2 is implemented"
         V = VectorFunctionSpace(mesh, "CG", k)
-        Q = FunctionSpace(mesh, "DG", k-2)
+        Q = FunctionSpace(mesh, "DG", 0)
     else:
         raise ValueError("please specify hdiv or cg for --discretisation")
 
@@ -80,7 +79,7 @@ v, q = TestFunctions(Z)
 bcs = [DirichletBC(Z.sub(0), Constant((0., 0.)), "on_boundary")]
 
 omega = 0.1 #0.4, 0.1
-delta = 200 #10, 200
+delta = 150 #10, 200
 mu_min = Constant(dr**-0.5)
 mu_max = Constant(dr**0.5)
 
@@ -158,7 +157,6 @@ F += divrhs * q * dx(degree=2*(k-1))
 if args.discretisation == "hdiv":
     Fgamma = F + Constant(gamma)*inner(div(u)-divrhs, div(v))*dx(degree=2*(k-1))
 elif args.discretisation == "cg":
-    assert k == 2, "only k=2 is implemented"
     Fgamma = F + Constant(gamma)*inner(cell_avg(div(u))-divrhs, cell_avg(div(v)))*dx(degree=2*(k-1))
 else:
     raise ValueError("please specify hdiv or cg for --discretisation")
@@ -266,7 +264,7 @@ params = {
     "snes_monitor": None,
     "mat_type": "nest",
     "ksp_type": "fgmres",
-    "ksp_rtol": 1.0e-10,
+    "ksp_rtol": 1.0e-6,
     "ksp_atol": 1.0e-10,
     "ksp_max_it": 200,
     "ksp_monitor_true_residual": None,
@@ -288,12 +286,12 @@ elif args.solver_type == "lu":
     params = {
         "snes_type": "ksponly",
         "snes_monitor": None,
-        "snes_atol": 1e-10,
+        "snes_atol": 1e-6,
         "snes_rtol": 1e-10,
         "mat_type": "aij",
         "pmat_type": "aij",
         "ksp_type": "preonly",
-        "ksp_rtol": 1.0e-10,
+        "ksp_rtol": 1.0e-6,
         "ksp_atol": 1.0e-10,
         "ksp_max_it": 300,
         "ksp_monitor_true_residual": None,
@@ -309,15 +307,15 @@ appctx = {"nu": mu_fun, "gamma": gamma, "dr":dr, "case":case, "w":w}
 
 # Solve Stoke's equation
 def aug_jacobian(X, J, level):
+    print("level %d" % level)
     if case == 4 or case == 5:
         levelmesh = mh[level]
         if args.discretisation == "hdiv":
             Vlevel = FunctionSpace(mesh, "BDM", k)
             Qlevel = FunctionSpace(mesh, "DG", k-1)
         elif args.discretisation == "cg":
-            assert k == 2, "only k=2 is implemented"
             Vlevel = VectorFunctionSpace(mesh, "CG", k)
-            Qlevel = FunctionSpace(mesh, "DG", k-2)
+            Qlevel = FunctionSpace(mesh, "DG", 0)
         else:
             raise ValueError("please specify hdiv or cg for --discretisation")
         Zlevel = Vlevel * Qlevel
@@ -346,8 +344,10 @@ def aug_jacobian(X, J, level):
 
         nested_IS = J.getNestISs()
         Jsub = J.getLocalSubMatrix(nested_IS[0][0], nested_IS[0][0])
-        #Jsub.axpy(1, BTWB, structure=Jsub.Structure.SUBSET_NONZERO_PATTERN)
-        Jsub.axpy(1, BTWB)
+        if args.discretisation == "hdiv":
+            Jsub.axpy(1, BTWB, structure=Jsub.Structure.SUBSET_NONZERO_PATTERN)
+        elif args.discretisation == "cg":
+            Jsub.axpy(1, BTWB)
         J.restoreLocalSubMatrix(nested_IS[0][0], nested_IS[0][0], Jsub)
     elif case == 6:
         raise ValueError("Augmented Jacobian (case %d) not implemented yet" % case)
@@ -397,8 +397,9 @@ for i in range(args.itref+1):
                                      post_function_callback=modify_residual,
                                      appctx=appctx, nullspace=nsp)
 
-    transfermanager = TransferManager(native_transfers=get_transfers())
-    solver.set_transfer_manager(transfermanager)
+    if args.solver_type == "almg":
+        transfermanager = TransferManager(native_transfers=get_transfers())
+        solver.set_transfer_manager(transfermanager)
     # Write out solution
     solver.solve()
     if case==3 or case==4:

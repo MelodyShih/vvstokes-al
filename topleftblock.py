@@ -55,9 +55,8 @@ if args.discretisation == "hdiv":
     V = FunctionSpace(mesh, "BDM", k)
     Q = FunctionSpace(mesh, "DG", k-1)
 elif args.discretisation == "cg":
-    assert k == 2, "only k=2 is implemented"
     V = VectorFunctionSpace(mesh, "CG", k)
-    Q = FunctionSpace(mesh, "DG", k-2)
+    Q = FunctionSpace(mesh, "DG", 0)
 else:
     raise ValueError("please specify hdiv or cg for --discretisation")
     
@@ -133,7 +132,6 @@ F += -10 * (chi_n(mesh)-1)*v[1] * dx
 if args.discretisation == "hdiv":
     Fgamma = F + gamma*inner(div(u), div(v))*dx
 elif args.discretisation == "cg":
-    assert k == 2, "only k=2 is implemented"
     Fgamma = F + gamma*inner(cell_avg(div(u)), div(v))*dx
 else:
     raise ValueError("please specify hdiv or cg for --discretisation")
@@ -172,9 +170,9 @@ else:
 
 common = {
     "snes_type": "ksponly",
-    "ksp_type": "gmres",
+    "ksp_type": "fgmres",
     "ksp_norm_type": "unpreconditioned",
-    "ksp_rtol": 1.0e-10,
+    "ksp_rtol": 1.0e-6,
     "ksp_atol": 1.0e-10,
     "ksp_max_it": 300,
     "ksp_converged_reason": None,
@@ -220,16 +218,14 @@ else:
     raise ValueError("please specify almg, allu or alamg for --solver-type")
 
 def aug_jacobian(X, J, level):
-    print("level = %d"%level)
     if case == 4 or case == 5:
         levelmesh = mh[level]
         if args.discretisation == "hdiv":
             Vlevel = FunctionSpace(levelmesh, "BDM", k)
             Qlevel = FunctionSpace(levelmesh, "DG", k-1)
         elif args.discretisation == "cg":
-            assert k == 2, "only k=2 is implemented"
             Vlevel = VectorFunctionSpace(levelmesh, "CG", k)
-            Qlevel = FunctionSpace(levelmesh, "DG", k-2)
+            Qlevel = FunctionSpace(levelmesh, "DG", 0)
         else:
             raise ValueError("please specify hdiv or cg for --discretisation")
         Zlevel = Vlevel * Qlevel
