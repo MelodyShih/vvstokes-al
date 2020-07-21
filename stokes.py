@@ -79,7 +79,7 @@ v, q = TestFunctions(Z)
 bcs = [DirichletBC(Z.sub(0), Constant((0., 0.)), "on_boundary")]
 
 omega = 0.1 #0.4, 0.1
-delta = 150 #10, 200
+delta = 200 #10, 200
 mu_min = Constant(dr**-0.5)
 mu_max = Constant(dr**0.5)
 
@@ -307,15 +307,14 @@ appctx = {"nu": mu_fun, "gamma": gamma, "dr":dr, "case":case, "w":w}
 
 # Solve Stoke's equation
 def aug_jacobian(X, J, level):
-    print("level %d" % level)
     if case == 4 or case == 5:
         levelmesh = mh[level]
         if args.discretisation == "hdiv":
-            Vlevel = FunctionSpace(mesh, "BDM", k)
-            Qlevel = FunctionSpace(mesh, "DG", k-1)
+            Vlevel = FunctionSpace(levelmesh, "BDM", k)
+            Qlevel = FunctionSpace(levelmesh, "DG", k-1)
         elif args.discretisation == "cg":
-            Vlevel = VectorFunctionSpace(mesh, "CG", k)
-            Qlevel = FunctionSpace(mesh, "DG", 0)
+            Vlevel = VectorFunctionSpace(levelmesh, "CG", k)
+            Qlevel = FunctionSpace(levelmesh, "DG", 0)
         else:
             raise ValueError("please specify hdiv or cg for --discretisation")
         Zlevel = Vlevel * Qlevel
@@ -342,13 +341,19 @@ def aug_jacobian(X, J, level):
         BTWlevel *= args.gamma
         BTWBlevel = BTWlevel.matMult(Blevel)
 
-        nested_IS = J.getNestISs()
-        Jsub = J.getLocalSubMatrix(nested_IS[0][0], nested_IS[0][0])
-        if args.discretisation == "hdiv":
-            Jsub.axpy(1, BTWB, structure=Jsub.Structure.SUBSET_NONZERO_PATTERN)
-        elif args.discretisation == "cg":
-            Jsub.axpy(1, BTWB)
-        J.restoreLocalSubMatrix(nested_IS[0][0], nested_IS[0][0], Jsub)
+        if level == nref:
+            nested_IS = J.getNestISs()
+            Jsub = J.getLocalSubMatrix(nested_IS[0][0], nested_IS[0][0])
+            if args.discretisation == "hdiv":
+                Jsub.axpy(1, BTWBlevel, structure=Jsub.Structure.SUBSET_NONZERO_PATTERN)
+            elif args.discretisation == "cg":
+                Jsub.axpy(1, BTWBlevel)
+            J.restoreLocalSubMatrix(nested_IS[0][0], nested_IS[0][0], Jsub)
+        else:
+            if args.discretisation == "hdiv":
+                J.axpy(1, BTWBlevel, structure=J.Structure.SUBSET_NONZERO_PATTERN)
+            elif args.discretisation == "cg":
+                J.axpy(1, BTWBlevel)
     elif case == 6:
         raise ValueError("Augmented Jacobian (case %d) not implemented yet" % case)
 
