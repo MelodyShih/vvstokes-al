@@ -374,16 +374,10 @@ def get_transfers():
     V = Z.sub(0)
     Q = Z.sub(1)
     tdim = mesh.topological_dimension()
-    if args.discretisation == "hdiv":
-        transfers = {V.ufl_element(): (prolong, restrict, inject),
-                     Q.ufl_element(): (prolong, restrict, inject)}
-    elif args.discretisation == "cg":
-        vtransfer = PkP0SchoeberlTransfer((mu, gamma), tdim, hierarchy)
-        qtransfer = NullTransfer()
-        transfers = {V.ufl_element(): (vtransfer.prolong, vtransfer.restrict, inject),
-                     Q.ufl_element(): (prolong, restrict, qtransfer.inject)}
-    else:
-        raise ValueError("please specify hdiv or cg for --discretisation")
+    vtransfer = PkP0SchoeberlTransfer((mu, gamma), tdim, hierarchy)
+    qtransfer = NullTransfer()
+    transfers = {V.ufl_element(): (vtransfer.prolong, vtransfer.restrict, inject),
+                 Q.ufl_element(): (prolong, restrict, qtransfer.inject)}
     return transfers
 
 nsp = MixedVectorSpaceBasis(Z, [Z.sub(0), VectorSpaceBasis(constant=True)])
@@ -402,7 +396,7 @@ for i in range(args.itref+1):
                                      post_function_callback=modify_residual,
                                      appctx=appctx, nullspace=nsp)
 
-    if args.solver_type == "almg":
+    if args.solver_type == "almg" and args.discretisation == "cg":
         transfermanager = TransferManager(native_transfers=get_transfers())
         solver.set_transfer_manager(transfermanager)
     # Write out solution
