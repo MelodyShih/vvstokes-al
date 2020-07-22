@@ -1,4 +1,5 @@
 from firedrake import *
+from firedrake.petsc import PETSc
 from alfi.transfer import *
 from functools import reduce
 
@@ -70,9 +71,9 @@ else:
 
 
 Z = V * Q
-print("dim(Z) = ", Z.dim())
-print("dim(V) = ", V.dim())
-print("dim(Q) = ", Q.dim())
+PETSc.Sys.Print("dim(Z) = ", Z.dim())
+PETSc.Sys.Print("dim(V) = ", V.dim())
+PETSc.Sys.Print("dim(Q) = ", Q.dim())
 z = Function(Z)
 u, p = TrialFunctions(Z)
 v, q = TestFunctions(Z)
@@ -342,13 +343,13 @@ def aug_jacobian(X, J, level):
         BTWBlevel = BTWlevel.matMult(Blevel)
 
         if level == nref:
-            nested_IS = J.getNestISs()
-            Jsub = J.getLocalSubMatrix(nested_IS[0][0], nested_IS[0][0])
+            vel_is = Z._ises[0]
+            Jsub = J.getLocalSubMatrix(vel_is, vel_is)
             if args.discretisation == "hdiv":
                 Jsub.axpy(1, BTWBlevel, structure=Jsub.Structure.SUBSET_NONZERO_PATTERN)
             elif args.discretisation == "cg":
                 Jsub.axpy(1, BTWBlevel)
-            J.restoreLocalSubMatrix(nested_IS[0][0], nested_IS[0][0], Jsub)
+            J.restoreLocalSubMatrix(vel_is, vel_is, Jsub)
         else:
             if args.discretisation == "hdiv":
                 J.axpy(1, BTWBlevel, structure=J.Structure.SUBSET_NONZERO_PATTERN)
@@ -403,9 +404,9 @@ for i in range(args.itref+1):
     solver.solve()
     if case==3 or case==4:
         with assemble(action(Fgamma, z), bcs=homogenize(bcs)).dat.vec_ro as v:
-            print('Residual with    grad-div', v.norm())
+            PETSc.Sys.Print('Residual with    grad-div', v.norm())
         with assemble(action(F, z), bcs=homogenize(bcs)).dat.vec_ro as w:
-            print('Residual without grad-div', w.norm())
+            PETSc.Sys.Print('Residual without grad-div', w.norm())
 
 #File("u.pvd").write(z.split()[0])
 # uncomment lines below to write out the solution. then run with --case 3 first
@@ -418,10 +419,10 @@ for i in range(args.itref+1):
 # z3 = z.copy(deepcopy=True)
 # with DumbCheckpoint(f"u-{3}", mode=FILE_READ) as checkpoint:
 #     checkpoint.load(z3, name="up")
-# print("absolute diff in vel: ", norm(z.split()[0]-z3.split()[0]))
-# print("relative diff in vel: ", norm(z.split()[0]-z3.split()[0])/norm(z.split()[0]))
-# print("absolute diff in pre: ", norm(z.split()[1]-z3.split()[1]))
-# print("relative diff in pre: ", norm(z.split()[1]-z3.split()[1])/norm(z.split()[1]))
+# PETSc.Sys.Print("absolute diff in vel: ", norm(z.split()[0]-z3.split()[0]))
+# PETSc.Sys.Print("relative diff in vel: ", norm(z.split()[0]-z3.split()[0])/norm(z.split()[0]))
+# PETSc.Sys.Print("absolute diff in pre: ", norm(z.split()[1]-z3.split()[1]))
+# PETSc.Sys.Print("relative diff in pre: ", norm(z.split()[1]-z3.split()[1])/norm(z.split()[1]))
 #
 # File(f"up-{args.case}.pvd").write(*(z.split()))
 

@@ -62,8 +62,8 @@ else:
     
 Z = V * Q
 
-print("dim(V) = ", V.dim())
-print("dim(Q) = ", Q.dim())
+PETSc.Sys.Print("dim(V) = ", V.dim())
+PETSc.Sys.Print("dim(Q) = ", Q.dim())
 
 sol = Function(V)
 u = TrialFunction(V)
@@ -288,13 +288,13 @@ if args.nonzero_initial_guess:
 #        :arg uc: The source (coarse grid) function.
 #        :arg uf: The target (fine grid) function.
 #        """
-#        print("From mesh %i to %i" % (uc.function_space().dim(), uf.function_space().dim()))
-#        #print("energy_norm(u_H)   ", energy_norm(uc))
+#        PETSc.Sys.Print("From mesh %i to %i" % (uc.function_space().dim(), uf.function_space().dim()))
+#        #PETSc.Sys.Print("energy_norm(u_H)   ", energy_norm(uc))
 #        super().prolong(uc,uf)
-#        #print("energy_norm(P_hu_H)", energy_norm(uf))
-#        #print("energy ratio:")
-#        print("   energy ratio:  ", energy_norm(uf)/energy_norm(uc))
-#        #print()
+#        #PETSc.Sys.Print("energy_norm(P_hu_H)", energy_norm(uf))
+#        #PETSc.Sys.Print("energy ratio:")
+#        PETSc.Sys.Print("   energy ratio:  ", energy_norm(uf)/energy_norm(uc))
+#        #PETSc.Sys.Print()
 #
 #    def inject(self, uf, uc):
 #        """Inject a function (primal restriction)
@@ -303,16 +303,16 @@ if args.nonzero_initial_guess:
 #        :arg uc: The target (coarse grid) function.
 #        """
 #        if get_appctx(uc.function_space().dm) is not None:
-#            print("From mesh %i to %i" % (uf.function_space().dim(), uc.function_space().dim()))
-#            print("energy_norm(u_h)   ", energy_norm(uf))
+#            PETSc.Sys.Print("From mesh %i to %i" % (uf.function_space().dim(), uc.function_space().dim()))
+#            PETSc.Sys.Print("energy_norm(u_h)   ", energy_norm(uf))
 #            super().inject(uf,uc)
-#            print("energy_norm(I_Hu_h)", energy_norm(uc))
-#            print("energy ratio:")
+#            PETSc.Sys.Print("energy_norm(I_Hu_h)", energy_norm(uc))
+#            PETSc.Sys.Print("energy ratio:")
 #            if abs(energy_norm(uf))<1e-15:
-#                print("   nan")
+#                PETSc.Sys.Print("   nan")
 #            else:
-#                print("  ", energy_norm(uc)/energy_norm(uf))
-#            print()
+#                PETSc.Sys.Print("  ", energy_norm(uc)/energy_norm(uf))
+#            PETSc.Sys.Print()
 #        else:
 #            super().inject(uf,uc)
 
@@ -348,7 +348,7 @@ for i in range(args.itref+1):
     solver.solve()
     if case <= 4:
         with assemble(action(Fgamma, sol), bcs=homogenize(bcs)).dat.vec_ro as v:
-            print('Relative residual with    grad-div', v.norm()/norm(sol))
+            PETSc.Sys.Print('Relative residual with    grad-div', v.norm()/norm(sol))
 
 # Write out solution
 File("u.pvd").write(sol)
