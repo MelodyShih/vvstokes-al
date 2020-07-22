@@ -103,8 +103,8 @@ else:
     raise NotImplementedError("Only implemented for dim=2,3")
 
 
-omega = 0.2 #0.4, 0.1
-delta = 100 #10, 200
+omega = 0.1 #0.4, 0.1
+delta = 200 #10, 200
 mu_min = Constant(dr**-0.5)
 mu_max = Constant(dr**0.5)
 
@@ -156,7 +156,12 @@ def mu(mesh):
 File("mu_"+str(N)+"_delta_"+str(delta)+".pvd").write(mu(mesh))
 
 sigma = Constant(100.)
-h = CellDiameter(mesh)
+if args.discretisation == "hdiv":
+	h = Constant(sqrt(2)/(N*(2**nref)))
+elif args.discretisation == "cg":
+	h = CellDiameter(mesh)
+else:
+    raise ValueError("please specify hdiv or cg for --discretisation")
 n = FacetNormal(mesh)
 
 def diffusion(u, v, mu):
@@ -364,7 +369,12 @@ def aug_jacobian(X, J, level):
         tmpu, tmpp = TrialFunctions(Zlevel)
         tmpv, tmpq = TestFunctions(Zlevel)
         tmpF = -tmpq * div(tmpu) * dx
-        tmpbcs = [DirichletBC(Zlevel.sub(0), Constant((0., 0.)), "on_boundary")]
+        if dim == 2:
+            tmpbcs = [DirichletBC(Zlevel.sub(0), Constant((0., 0.)), "on_boundary")]
+        elif dim == 3:
+            tmpbcs = [DirichletBC(Zlevel.sub(0), Constant((0., 0., 0.)), "on_boundary")]
+        else:
+            raise NotImplementedError("Only implemented for dim=2,3")
         tmpa = lhs(tmpF)
         M = assemble(tmpa, bcs=tmpbcs)
         Blevel = M.M[1, 0].handle

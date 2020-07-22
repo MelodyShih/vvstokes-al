@@ -42,8 +42,7 @@ def after(dm, i):
 
 def mesh_hierarchy(hierarchy, nref, callbacks, distribution_parameters):
     if dim == 2:
-        baseMesh = RectangleMesh(N, N, 4, 4, distribution_parameters=distp, \
-                quadrilateral=args.quad)
+        baseMesh = RectangleMesh(N, N, 4, 4, distribution_parameters=distp)
     elif dim == 3:
         baseMesh = BoxMesh(N, N, N, 4, 4, 4, distribution_parameters=distp)
     else:
@@ -132,8 +131,13 @@ def mu(mesh):
 #File("mu.pvd").write(mu(mesh))
 
 sigma = Constant(100.)
-h = CellSize(mesh)
-#h = Constant(sqrt(2)/(N*(2**nref)))
+if args.discretisation == "hdiv":
+    h = Constant(sqrt(2)/(N*(2**nref)))
+elif args.discretisation == "cg":
+    h = CellDiameter(mesh)
+    #h = CellSize(mesh)
+else:
+    raise ValueError("please specify hdiv or cg for --discretisation")
 n = FacetNormal(mesh)
 
 def diffusion(u, v, mu):
@@ -270,7 +274,12 @@ def aug_jacobian(X, J, level):
         tmpu, tmpp = TrialFunctions(Zlevel)
         tmpv, tmpq = TestFunctions(Zlevel)
         tmpF = -tmpq * div(tmpu) * dx
-        tmpbcs = [DirichletBC(Zlevel.sub(0), Constant((0., 0.)), "on_boundary")]
+        if dim == 2:
+            tmpbcs = [DirichletBC(Zlevel.sub(0), Constant((0., 0.)), "on_boundary")]
+        elif dim == 3:
+            tmpbcs = [DirichletBC(Zlevel.sub(0), Constant((0., 0., 0.)), "on_boundary")]
+        else:
+            raise NotImplementedError("Only implemented for dim=2,3")
         tmpa = lhs(tmpF)
         M = assemble(tmpa, bcs=tmpbcs)
         Blevel = M.M[1, 0].handle
@@ -292,12 +301,7 @@ def aug_jacobian(X, J, level):
 
 def modify_residual(X, F):
     if case == 4 or case == 5:
-        vel_is = Z._ises[0]
-        pre_is = Z._ises[1]
-        Fvel = F.getSubVector(vel_is)
-        Xvel = X.getSubVector(vel_is)
-        Fvel += BTWB*Xvel
-        F.restoreSubVector(vel_is, Fvel)
+        F += BTWB*X
     else:
         return
 
@@ -357,16 +361,10 @@ def get_transfers():
     V = Z.sub(0)
     Q = Z.sub(1)
     tdim = mesh.topological_dimension()
-    if args.discretisation == "hdiv":
-        transfers = {V.ufl_element(): (prolong, restrict, inject),
-                     Q.ufl_element(): (prolong, restrict, inject)}
-    elif args.discretisation == "cg":
-        vtransfer = PkP0SchoeberlTransfer((mu, gamma), tdim, hierarchy)
-        qtransfer = NullTransfer()
-        transfers = {V.ufl_element(): (vtransfer.prolong, vtransfer.restrict, inject),
-                     Q.ufl_element(): (prolong, restrict, qtransfer.inject)}
-    else:
-        raise ValueError("please specify hdiv or cg for --discretisation")
+    vtransfer = PkP0SchoeberlTransfer((mu, gamma), tdim, hierarchy)
+    qtransfer = NullTransfer()
+    transfers = {V.ufl_element(): (vtransfer.prolong, vtransfer.restrict, inject),
+                 Q.ufl_element(): (prolong, restrict, qtransfer.inject)}
     return transfers
 
 for i in range(args.itref+1):
@@ -376,9 +374,9 @@ for i in range(args.itref+1):
                                      options_prefix="topleft_",
                                      post_jacobian_callback=aug_jacobian, 
                                      post_function_callback=modify_residual)
-
-    transfermanager = TransferManager(native_transfers=get_transfers())
-    solver.set_transfer_manager(transfermanager)
+    if args.solver_type == "almg" and args.discretisation == "cg":
+        transfermanager = TransferManager(native_transfers=get_transfers())
+        solver.set_transfer_manager(transfermanager)
     #transfer = MyTransferManager()
     #solver.set_transfer_manager(transfer)
 
