@@ -153,15 +153,19 @@ def mu(mesh):
     Qm = FunctionSpace(mesh, Q.ufl_element())
     return Function(Qm).interpolate(mu_expr(mesh))
 
-File("mu_"+str(N)+"_delta_"+str(delta)+".pvd").write(mu(mesh))
+#File("mu_"+str(N)+"_delta_"+str(delta)+".pvd").write(mu(mesh))
 
 sigma = Constant(100.)
-if args.discretisation == "hdiv":
-	h = Constant(sqrt(2)/(N*(2**nref)))
-elif args.discretisation == "cg":
-	h = CellDiameter(mesh)
+if args.quad:
+    h = CellDiameter(mesh)
 else:
-    raise ValueError("please specify hdiv or cg for --discretisation")
+    if args.discretisation == "hdiv":
+        #h = CellDiameter(mesh)
+        h = Constant(sqrt(2)/(N*(2**nref)))
+    elif args.discretisation == "cg":
+        h = CellDiameter(mesh)
+    else:
+        raise ValueError("please specify hdiv or cg for --discretisation")
 n = FacetNormal(mesh)
 
 def diffusion(u, v, mu):
@@ -192,12 +196,15 @@ else:
     divrhs = Constant(0)
 F += divrhs * q * dx(degree=2*(k-1))
 
-if args.discretisation == "hdiv":
+if args.quad:
     Fgamma = F + Constant(gamma)*inner(div(u)-divrhs, div(v))*dx(degree=2*(k-1))
-elif args.discretisation == "cg":
-    Fgamma = F + Constant(gamma)*inner(cell_avg(div(u))-divrhs, cell_avg(div(v)))*dx(degree=2*(k-1))
 else:
-    raise ValueError("please specify hdiv or cg for --discretisation")
+    if args.discretisation == "hdiv":
+        Fgamma = F + Constant(gamma)*inner(div(u)-divrhs, div(v))*dx(degree=2*(k-1))
+    elif args.discretisation == "cg":
+        Fgamma = F + Constant(gamma)*inner(cell_avg(div(u))-divrhs, cell_avg(div(v)))*dx(degree=2*(k-1))
+    else:
+        raise ValueError("please specify hdiv or cg for --discretisation")
 
 if case < 4:
     a = lhs(Fgamma)
@@ -347,23 +354,27 @@ appctx = {"nu": mu_fun, "gamma": gamma, "dr":dr, "case":case, "w":w}
 def aug_jacobian(X, J, level):
     if case == 4 or case == 5:
         levelmesh = mh[level]
-        if args.discretisation == "hdiv":
-            Vlevel = FunctionSpace(levelmesh, "BDM", k)
-            Qlevel = FunctionSpace(levelmesh, "DG", k-1)
-        elif args.discretisation == "cg":
-            if dim == 2:
-                Vlevel = VectorFunctionSpace(levelmesh, "CG", k)
-                Qlevel = FunctionSpace(levelmesh, "DG", 0)
-            elif dim == 3:
-                Pklevel = FiniteElement("Lagrange", levelmesh.ufl_cell(), 2)
-                FBlevel = FiniteElement("FacetBubble", levelmesh.ufl_cell(), 3)
-                eleulevel = VectorElement(NodalEnrichedElement(Pklevel, FBlevel))
-                Vlevel = FunctionSpace(levelmesh, eleulevel)
-                Qlevel = FunctionSpace(levelmesh, "DG", 0)
-            else:
-                raise NotImplementedError("Only implemented for dim=2,3")
+        if args.quad:
+            Vlevel = FunctionSpace(levelmesh, "RTCF", k)
+            Qlevel = FunctionSpace(levelmesh, "DQ", k-1)
         else:
-            raise ValueError("please specify hdiv or cg for --discretisation")
+            if args.discretisation == "hdiv":
+                Vlevel = FunctionSpace(levelmesh, "BDM", k)
+                Qlevel = FunctionSpace(levelmesh, "DG", k-1)
+            elif args.discretisation == "cg":
+                if dim == 2:
+                    Vlevel = VectorFunctionSpace(levelmesh, "CG", k)
+                    Qlevel = FunctionSpace(levelmesh, "DG", 0)
+                elif dim == 3:
+                    Pklevel = FiniteElement("Lagrange", levelmesh.ufl_cell(), 2)
+                    FBlevel = FiniteElement("FacetBubble", levelmesh.ufl_cell(), 3)
+                    eleulevel = VectorElement(NodalEnrichedElement(Pklevel, FBlevel))
+                    Vlevel = FunctionSpace(levelmesh, eleulevel)
+                    Qlevel = FunctionSpace(levelmesh, "DG", 0)
+                else:
+                    raise NotImplementedError("Only implemented for dim=2,3")
+            else:
+                raise ValueError("please specify hdiv or cg for --discretisation")
         Zlevel = Vlevel * Qlevel
         # Get B
         tmpu, tmpp = TrialFunctions(Zlevel)
@@ -448,9 +459,10 @@ for i in range(args.itref+1):
                                      post_function_callback=modify_residual,
                                      appctx=appctx, nullspace=nsp)
 
-    if args.solver_type == "almg" and args.discretisation == "cg":
-        transfermanager = TransferManager(native_transfers=get_transfers())
-        solver.set_transfer_manager(transfermanager)
+    if not args.quad:
+        if args.solver_type == "almg" and args.discretisation == "cg":
+            transfermanager = TransferManager(native_transfers=get_transfers())
+            solver.set_transfer_manager(transfermanager)
     # Write out solution
     solver.solve()
     if case==3 or case==4:

@@ -18,6 +18,7 @@ parser.add_argument("--itref", type=int, default=0)
 parser.add_argument("--nonzero-initial-guess", dest="nonzero_initial_guess", default=False, action="store_true")
 parser.add_argument("--discretisation", type=str, default="hdiv")
 parser.add_argument("--dim", type=int, default=2)
+parser.add_argument("--quad", dest="quad", default=False, action="store_true")
 args, _ = parser.parse_known_args()
 
 
@@ -42,7 +43,8 @@ def after(dm, i):
 
 def mesh_hierarchy(hierarchy, nref, callbacks, distribution_parameters):
     if dim == 2:
-        baseMesh = RectangleMesh(N, N, 4, 4, distribution_parameters=distp)
+        baseMesh = RectangleMesh(N, N, 4, 4, distribution_parameters=distp, \
+                quadrilateral=args.quad)
     elif dim == 3:
         baseMesh = BoxMesh(N, N, N, 4, 4, 4, distribution_parameters=distp)
     else:
@@ -58,23 +60,27 @@ mh = mesh_hierarchy(hierarchy, nref, (before, after), distp)
 
 mesh = mh[-1]
 
-if args.discretisation == "hdiv":
-    V = FunctionSpace(mesh, "BDM", k)
-    Q = FunctionSpace(mesh, "DG", k-1)
-elif args.discretisation == "cg":
-    if dim == 2:
-        V = VectorFunctionSpace(mesh, "CG", k)
-        Q = FunctionSpace(mesh, "DG", 0)
-    elif dim == 3:
-        Pk = FiniteElement("Lagrange", mesh.ufl_cell(), 2)
-        FB = FiniteElement("FacetBubble", mesh.ufl_cell(), 3)
-        eleu = VectorElement(NodalEnrichedElement(Pk, FB))
-        V = FunctionSpace(mesh, eleu)
-        Q = FunctionSpace(mesh, "DG", 0)
-    else:
-        raise NotImplementedError("Only implemented for dim=2,3")
+if args.quad:
+    V = FunctionSpace(mesh, "RTCF", k)
+    Q = FunctionSpace(mesh, "DQ", k-1)
 else:
-    raise ValueError("please specify hdiv or cg for --discretisation")
+    if args.discretisation == "hdiv":
+        V = FunctionSpace(mesh, "BDM", k)
+        Q = FunctionSpace(mesh, "DG", k-1)
+    elif args.discretisation == "cg":
+        if dim == 2:
+            V = VectorFunctionSpace(mesh, "CG", k)
+            Q = FunctionSpace(mesh, "DG", 0)
+        elif dim == 3:
+            Pk = FiniteElement("Lagrange", mesh.ufl_cell(), 2)
+            FB = FiniteElement("FacetBubble", mesh.ufl_cell(), 3)
+            eleu = VectorElement(NodalEnrichedElement(Pk, FB))
+            V = FunctionSpace(mesh, eleu)
+            Q = FunctionSpace(mesh, "DG", 0)
+        else:
+            raise NotImplementedError("Only implemented for dim=2,3")
+    else:
+        raise ValueError("please specify hdiv or cg for --discretisation")
     
 Z = V * Q
 
@@ -131,8 +137,9 @@ def mu(mesh):
 #File("mu.pvd").write(mu(mesh))
 
 sigma = Constant(100.)
-if args.discretisation == "hdiv":
-    h = Constant(sqrt(2)/(N*(2**nref)))
+if args.discretisation == "hdiv" or args.quad:
+    h = CellDiameter(mesh)
+    #h = Constant(sqrt(2)/(N*(2**nref)))
 elif args.discretisation == "cg":
     h = CellDiameter(mesh)
     #h = CellSize(mesh)
@@ -161,12 +168,15 @@ for bc in bcs:
     F += nitsche(u, v, mu_expr(mesh), bid, g)
 
 F += -10 * (chi_n(mesh)-1)*v[1] * dx
-if args.discretisation == "hdiv":
+if args.quad:
     Fgamma = F + gamma*inner(div(u), div(v))*dx
-elif args.discretisation == "cg":
-    Fgamma = F + gamma*inner(cell_avg(div(u)), div(v))*dx
 else:
-    raise ValueError("please specify hdiv or cg for --discretisation")
+    if args.discretisation == "hdiv":
+        Fgamma = F + gamma*inner(div(u), div(v))*dx
+    elif args.discretisation == "cg":
+        Fgamma = F + gamma*inner(cell_avg(div(u)), div(v))*dx
+    else:
+        raise ValueError("please specify hdiv or cg for --discretisation")
 
 if case < 4:
     a = lhs(Fgamma)
@@ -252,23 +262,27 @@ else:
 def aug_jacobian(X, J, level):
     if case == 4 or case == 5:
         levelmesh = mh[level]
-        if args.discretisation == "hdiv":
-            Vlevel = FunctionSpace(levelmesh, "BDM", k)
-            Qlevel = FunctionSpace(levelmesh, "DG", k-1)
-        elif args.discretisation == "cg":
-            if dim == 2:
-                Vlevel = VectorFunctionSpace(levelmesh, "CG", k)
-                Qlevel = FunctionSpace(levelmesh, "DG", 0)
-            elif dim == 3:
-                Pklevel = FiniteElement("Lagrange", levelmesh.ufl_cell(), 2)
-                FBlevel = FiniteElement("FacetBubble", levelmesh.ufl_cell(), 3)
-                eleulevel = VectorElement(NodalEnrichedElement(Pklevel, FBlevel))
-                Vlevel = FunctionSpace(levelmesh, eleulevel)
-                Qlevel = FunctionSpace(levelmesh, "DG", 0)
-            else:
-                raise NotImplementedError("Only implemented for dim=2,3")
+        if args.quad:
+            Vlevel = FunctionSpace(levelmesh, "RTCF", k)
+            Qlevel = FunctionSpace(levelmesh, "DQ", k-1)
         else:
-            raise ValueError("please specify hdiv or cg for --discretisation")
+            if args.discretisation == "hdiv":
+                Vlevel = FunctionSpace(levelmesh, "BDM", k)
+                Qlevel = FunctionSpace(levelmesh, "DG", k-1)
+            elif args.discretisation == "cg":
+                if dim == 2:
+                    Vlevel = VectorFunctionSpace(levelmesh, "CG", k)
+                    Qlevel = FunctionSpace(levelmesh, "DG", 0)
+                elif dim == 3:
+                    Pklevel = FiniteElement("Lagrange", levelmesh.ufl_cell(), 2)
+                    FBlevel = FiniteElement("FacetBubble", levelmesh.ufl_cell(), 3)
+                    eleulevel = VectorElement(NodalEnrichedElement(Pklevel, FBlevel))
+                    Vlevel = FunctionSpace(levelmesh, eleulevel)
+                    Qlevel = FunctionSpace(levelmesh, "DG", 0)
+                else:
+                    raise NotImplementedError("Only implemented for dim=2,3")
+            else:
+                raise ValueError("please specify hdiv or cg for --discretisation")
         Zlevel = Vlevel * Qlevel
         # Get B
         tmpu, tmpp = TrialFunctions(Zlevel)
@@ -374,9 +388,10 @@ for i in range(args.itref+1):
                                      options_prefix="topleft_",
                                      post_jacobian_callback=aug_jacobian, 
                                      post_function_callback=modify_residual)
-    if args.solver_type == "almg" and args.discretisation == "cg":
-        transfermanager = TransferManager(native_transfers=get_transfers())
-        solver.set_transfer_manager(transfermanager)
+    if not args.quad:
+        if args.solver_type == "almg" and args.discretisation == "cg":
+            transfermanager = TransferManager(native_transfers=get_transfers())
+            solver.set_transfer_manager(transfermanager)
     #transfer = MyTransferManager()
     #solver.set_transfer_manager(transfer)
 
@@ -386,7 +401,7 @@ for i in range(args.itref+1):
             PETSc.Sys.Print('Relative residual with    grad-div', v.norm()/norm(sol))
 
 # Write out solution
-File("u.pvd").write(sol)
+#File("u.pvd").write(sol)
 
 # if Z.dim() > 1e4 or mesh.mpi_comm().size > 1:
 #     import sys; sys.exit()
