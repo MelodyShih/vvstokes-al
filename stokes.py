@@ -20,6 +20,7 @@ parser.add_argument("--quad", dest="quad", default=False, action="store_true")
 parser.add_argument("--itref", type=int, default=0)
 parser.add_argument("--w", type=float, default=0.0)
 parser.add_argument("--discretisation", type=str, default="hdiv")
+parser.add_argument("--dim", type=int, default=2)
 args, _ = parser.parse_known_args()
 
 
@@ -30,6 +31,7 @@ N = args.N
 case = args.case
 w = args.w
 gamma = Constant(args.gamma)
+dim = args.dim
 
 distp = {"partition": True, "overlap_type": (DistributedMeshOverlapType.VERTEX, 1)}
 
@@ -43,7 +45,14 @@ def after(dm, i):
          dm.setLabelValue("prolongation", p, i+2)
 
 def mesh_hierarchy(hierarchy, nref, callbacks, distribution_parameters):
-    baseMesh = RectangleMesh(N, N, 4, 4, distribution_parameters=distp, quadrilateral=args.quad)
+    if dim == 2:
+        baseMesh = RectangleMesh(N, N, 4, 4, distribution_parameters=distp, \
+                quadrilateral=args.quad)
+    elif dim == 3:
+        baseMesh = BoxMesh(N, N, N, 4, 4, 4, distribution_parameters=distp)
+    else:
+        raise NotImplementedError("Only implemented for dim=2,3")
+
     if hierarchy == "uniform":
         mh = MeshHierarchy(baseMesh, nref, reorder=True, callbacks=callbacks,
                            distribution_parameters=distribution_parameters)
@@ -63,8 +72,17 @@ else:
         V = FunctionSpace(mesh, "BDM", k)
         Q = FunctionSpace(mesh, "DG", k-1)
     elif args.discretisation == "cg":
-        V = VectorFunctionSpace(mesh, "CG", k)
-        Q = FunctionSpace(mesh, "DG", 0)
+        if dim == 2:
+            V = VectorFunctionSpace(mesh, "CG", k)
+            Q = FunctionSpace(mesh, "DG", 0)
+        elif dim == 3:
+            Pk = FiniteElement("Lagrange", mesh.ufl_cell(), 2)
+            FB = FiniteElement("FacetBubble", mesh.ufl_cell(), 3)
+            eleu = VectorElement(NodalEnrichedElement(Pk, FB))
+            V = FunctionSpace(mesh, eleu)
+            Q = FunctionSpace(mesh, "DG", 0)
+        else:
+            raise NotImplementedError("Only implemented for dim=2,3")
     else:
         raise ValueError("please specify hdiv or cg for --discretisation")
 
@@ -76,10 +94,16 @@ print("dim(Q) = ", Q.dim())
 z = Function(Z)
 u, p = TrialFunctions(Z)
 v, q = TestFunctions(Z)
-bcs = [DirichletBC(Z.sub(0), Constant((0., 0.)), "on_boundary")]
+if dim == 2:
+    bcs = [DirichletBC(Z.sub(0), Constant((0., 0.)), "on_boundary")]
+elif dim == 3:
+    bcs = [DirichletBC(Z.sub(0), Constant((0., 0., 0.)), "on_boundary")]
+else:
+    raise NotImplementedError("Only implemented for dim=2,3")
 
-omega = 0.1 #0.4, 0.1
-delta = 200 #10, 200
+
+omega = 0.2 #0.4, 0.1
+delta = 100 #10, 200
 mu_min = Constant(dr**-0.5)
 mu_max = Constant(dr**0.5)
 
@@ -93,9 +117,17 @@ def chi_n(mesh):
     indis = []
     np.random.seed(1)
     for i in range(8):
-        cx = 2+np.random.uniform(-1,1)
-        cy = 2+np.random.uniform(-1,1)
-        indis.append(indi(Constant((cx,cy))))
+        if dim == 2:
+            cx = 2+np.random.uniform(-1,1)
+            cy = 2+np.random.uniform(-1,1)
+            indis.append(indi(Constant((cx,cy))))
+        elif dim == 3:
+            cx = 2+np.random.uniform(-1,1)
+            cy = 2+np.random.uniform(-1,1)
+            cz = 2+np.random.uniform(-1,1)
+            indis.append(indi(Constant((cx,cy,cz))))
+        else:
+            raise NotImplementedError("Only implemented for dim=2,3")
     # Another test:
     # for i in range(4):
     #     cx = 2+np.random.uniform(-1,1)
@@ -120,7 +152,7 @@ def mu(mesh):
     Qm = FunctionSpace(mesh, Q.ufl_element())
     return Function(Qm).interpolate(mu_expr(mesh))
 
-File("mu.pvd").write(mu(mesh))
+File("mu_"+str(N)+"_delta_"+str(delta)+".pvd").write(mu(mesh))
 
 sigma = Constant(100.)
 h = CellDiameter(mesh)
@@ -313,8 +345,17 @@ def aug_jacobian(X, J, level):
             Vlevel = FunctionSpace(levelmesh, "BDM", k)
             Qlevel = FunctionSpace(levelmesh, "DG", k-1)
         elif args.discretisation == "cg":
-            Vlevel = VectorFunctionSpace(levelmesh, "CG", k)
-            Qlevel = FunctionSpace(levelmesh, "DG", 0)
+            if dim == 2:
+                Vlevel = VectorFunctionSpace(levelmesh, "CG", k)
+                Qlevel = FunctionSpace(levelmesh, "DG", 0)
+            elif dim == 3:
+                Pklevel = FiniteElement("Lagrange", levelmesh.ufl_cell(), 2)
+                FBlevel = FiniteElement("FacetBubble", levelmesh.ufl_cell(), 3)
+                eleulevel = VectorElement(NodalEnrichedElement(Pklevel, FBlevel))
+                Vlevel = FunctionSpace(levelmesh, eleulevel)
+                Qlevel = FunctionSpace(levelmesh, "DG", 0)
+            else:
+                raise NotImplementedError("Only implemented for dim=2,3")
         else:
             raise ValueError("please specify hdiv or cg for --discretisation")
         Zlevel = Vlevel * Qlevel
