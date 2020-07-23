@@ -169,16 +169,22 @@ else:
 n = FacetNormal(mesh)
 
 def diffusion(u, v, mu):
-    return (mu*inner(2*sym(grad(u)), grad(v)))*dx \
-        - mu * inner(avg(2*sym(grad(u))), 2*avg(outer(v, n))) * dS \
-        - mu * inner(avg(2*sym(grad(v))), 2*avg(outer(u, n))) * dS \
-        + mu * sigma/avg(h) * inner(2*avg(outer(u,n)),2*avg(outer(v,n))) * dS
+    if args.discretisation == "cg":
+        return (mu*inner(2*sym(grad(u)), grad(v)))*dx
+    else:
+        return (mu*inner(2*sym(grad(u)), grad(v)))*dx \
+            - mu * inner(avg(2*sym(grad(u))), 2*avg(outer(v, n))) * dS \
+            - mu * inner(avg(2*sym(grad(v))), 2*avg(outer(u, n))) * dS \
+            + mu * sigma/avg(h) * inner(2*avg(outer(u,n)),2*avg(outer(v,n))) * dS
 
 def nitsche(u, v, mu, bid, g):
-    my_ds = ds if bid == "on_boundary" else ds(bid)
-    return -inner(outer(v,n),2*mu*sym(grad(u)))*my_ds \
-           -inner(outer(u-g,n),2*mu*sym(grad(v)))*my_ds \
-           +mu*(sigma/h)*inner(v,u-g)*my_ds
+    if args.discretisation == "cg":
+        return 0
+    else:
+        my_ds = ds if bid == "on_boundary" else ds(bid)
+        return -inner(outer(v,n),2*mu*sym(grad(u)))*my_ds \
+               -inner(outer(u-g,n),2*mu*sym(grad(v)))*my_ds \
+               +mu*(sigma/h)*inner(v,u-g)*my_ds
 
 F = diffusion(u, v, mu_expr(mesh))
 for bc in bcs:

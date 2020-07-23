@@ -148,10 +148,13 @@ else:
 n = FacetNormal(mesh)
 
 def diffusion(u, v, mu):
-    return (mu*inner(2*sym(grad(u)), grad(v)))*dx \
-        - mu * inner(avg(2*sym(grad(u))), 2*avg(outer(v, n))) * dS \
-        - mu * inner(avg(2*sym(grad(v))), 2*avg(outer(u, n))) * dS \
-        + mu * sigma/avg(h) * inner(2*avg(outer(u,n)),2*avg(outer(v,n))) * dS
+    if args.discretisation == "cg":
+        return (mu*inner(2*sym(grad(u)), grad(v)))*dx
+    else:
+        return (mu*inner(2*sym(grad(u)), grad(v)))*dx \
+            - mu * inner(avg(2*sym(grad(u))), 2*avg(outer(v, n))) * dS \
+            - mu * inner(avg(2*sym(grad(v))), 2*avg(outer(u, n))) * dS \
+            + mu * sigma/avg(h) * inner(2*avg(outer(u,n)),2*avg(outer(v,n))) * dS
 
 def nitsche(u, v, mu, bid, g):
     my_ds = ds if bid == "on_boundary" else ds(bid)
