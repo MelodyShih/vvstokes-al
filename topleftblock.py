@@ -1,6 +1,7 @@
 from firedrake import *
 from alfi.transfer import *
 from functools import reduce
+from firedrake.mg.utils import get_level
 
 import argparse
 import numpy as np
@@ -262,9 +263,10 @@ elif args.solver_type == "alamg":
 else:
     raise ValueError("please specify almg, allu or alamg for --solver-type")
 
-def aug_jacobian(X, J, level):
+def aug_jacobian(X, J, ctx):
+    mh, level = get_level(ctx._x.ufl_domain())
+    levelmesh = mh[level]
     if case == 4 or case == 5:
-        levelmesh = mh[level]
         if args.quad:
             Vlevel = FunctionSpace(levelmesh, "RTCF", k)
             Qlevel = FunctionSpace(levelmesh, "DQ", k-1)

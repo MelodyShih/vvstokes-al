@@ -2,6 +2,7 @@ from firedrake import *
 from firedrake.petsc import PETSc
 from alfi.transfer import *
 from functools import reduce
+from firedrake.mg.utils import get_level
 
 import argparse
 import numpy as np
@@ -357,7 +358,9 @@ mu_fun= mu(mh[-1])
 appctx = {"nu": mu_fun, "gamma": gamma, "dr":dr, "case":case, "w":w}
 
 # Solve Stoke's equation
-def aug_jacobian(X, J, level):
+def aug_jacobian(X, J, ctx):
+    mh, level = get_level(ctx._x.ufl_domain())
+    levelmesh = mh[level]
     if case == 4 or case == 5:
         levelmesh = mh[level]
         if args.quad:

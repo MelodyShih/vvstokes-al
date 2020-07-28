@@ -146,7 +146,7 @@ l = rhs(Fgamma)
 common = {
     "snes_type": "ksponly",
     "mat_type": "aij",
-    "pmat_type": "aij",
+    "pmat_type":"aij",
     "ksp_type": "fgmres",
     "ksp_norm_type": "unpreconditioned",
     "ksp_rtol": 1.0e-6,
@@ -154,7 +154,6 @@ common = {
     "ksp_max_it": 300,
     "ksp_converged_reason": None,
     "ksp_monitor_true_residual": None,
-    "ksp_view": None,
 }
 
 solver_lu = {
@@ -177,7 +176,7 @@ mg_levels_solver = {
 solver_mg = {
     "pc_type": "mg",
     "pc_mg_type": "full",
-    "pc_mg_galerkin": "both",
+    #"pc_mg_galerkin": "both",
     "mg_levels": mg_levels_solver,
     "mg_coarse_pc_type": "python",
     "mg_coarse_pc_python_type": "firedrake.AssembledPC",
@@ -197,6 +196,27 @@ else:
 if args.nonzero_initial_guess:
     sol.project(Constant((1., 1.)))
 
+def aug_jacobian(X, J, ctx):
+    mh, level = get_level(ctx._x.ufl_domain())
+    levelmesh = mh[level]
+    if level == 0:
+        assert(ctx._fine._jacobian_assembled)
+        Jfine = ctx._fine._jac.petscmat
+
+        # Galerkin Projection
+        # Get P
+        if args.discretisation == "hdiv":
+            Vc = FunctionSpace(mh[level], "BDM", k)
+            Vf = FunctionSpace(mh[level+1], "BDM", k)
+        elif args.discretisation == "cg":
+            Vc = VectorFunctionSpace(mh[level], "CG", k)
+            Vf = VectorFunctionSpace(mh[level+1], "CG", k)
+        else:
+            raise ValueError("please specify hdiv or cg for --discretisation")
+        ProOp = build_prolongation_matrix(ctx.transfer_manager.prolong, Vc, Vf)
+        Jcoarse = Jfine.PtAP(ProOp)
+        Jcoarse.copy(J)
+
 def get_transfers():
     V = Z.sub(0)
     Q = Z.sub(1)
@@ -206,7 +226,7 @@ def get_transfers():
     transfers = {V.ufl_element(): (vtransfer.prolong, vtransfer.restrict, inject)}
     return transfers
 
-def build_prolongation_matrix(solver, V_coarse, V_fine):
+def build_prolongation_matrix(prolong, V_coarse, V_fine):
     ''' From coarse to fine '''
     uc = Function(V_coarse)
     uf = Function(V_fine)
@@ -218,22 +238,18 @@ def build_prolongation_matrix(solver, V_coarse, V_fine):
     ProOp.setUp()
     
 
-    transfer = solver._ctx.transfer_manager
-    prolong = transfer.prolong
-         
-    
     for icol in range(V_coarse.dim()):
         uc.dat.zero()
         if args.discretisation == "cg":
             uc.dat.data[int(icol/2)][icol%2] = 1.0
         else:
             uc.dat.data[icol] = 1.0
+        arr = uc.vector().get_local()
         prolong(uc, uf)
-        for irow in range(V_fine.dim()):
-            if args.discretisation == "cg":
-                ProOp.setValue(irow, icol, uf.dat.data[int(irow/2)][irow%2])
-            else:
-                ProOp.setValue(irow, icol, uf.dat.data[irow])
+        values = uf.vector().get_local()
+        rows = np.where(abs(values) > 1e-15)[0].astype(np.int32)
+        values = values[rows]
+        ProOp.setValues(rows, [icol], values)
 
     ProOp.assemblyBegin()
     ProOp.assemblyEnd()
@@ -247,23 +263,26 @@ def build_prolongation_matrix(solver, V_coarse, V_fine):
 for i in range(args.itref+1):
     problem = LinearVariationalProblem(a, l, sol, bcs=bcs)
     solver = LinearVariationalSolver(problem,
-                                     solver_parameters=params)
+                                     solver_parameters=params,
+                                     post_jacobian_callback=aug_jacobian)
     if args.solver_type == "almg" and args.discretisation == "cg":
         transfermanager = TransferManager(native_transfers=get_transfers())
         solver.set_transfer_manager(transfermanager)
 
-    pc = solver.snes.getKSP().getPC()
-    dm = pc.getDM()
-    V = get_function_space(dm)
-    hierarchy, level = get_level(V.mesh())
+    #pc = solver.snes.getKSP().getPC()
+    #dm = pc.getDM()
+    #V = get_function_space(dm)
+    #hierarchy, level = get_level(V.mesh())
 
-    Vf = V
-    while level > 0:
-        Vc = FunctionSpace(hierarchy[level-1], V.ufl_element())
-        ProOp = build_prolongation_matrix(solver, Vc, Vf)
-        pc.setMGInterpolation(level,ProOp)
-        Vf = Vc
-        level = level-1
+    #Vf = V
+    #while level > 0:
+    #    Vc = FunctionSpace(hierarchy[level-1], V.ufl_element())
+    #    print("level = %d , Vf size = %d, Vc size = %d" %(level, Vf.dim(), Vc.dim()))
+    #    transfer = solver._ctx.transfer_manager
+    #    ProOp = build_prolongation_matrix(transfer.prolong, Vc, Vf)
+    #    #pc.setMGInterpolation(level,ProOp)
+    #    Vf = Vc
+    #    level = level-1
 
     solver.solve()
     with assemble(action(Fgamma, sol), bcs=homogenize(bcs)).dat.vec_ro as v:
