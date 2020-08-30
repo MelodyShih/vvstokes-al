@@ -18,6 +18,8 @@ parser.add_argument("--N", type=int, default=10)
 parser.add_argument("--itref", type=int, default=0)
 parser.add_argument("--nonzero-initial-guess", dest="nonzero_initial_guess", default=False, action="store_true")
 parser.add_argument("--discretisation", type=str, default="hdiv")
+parser.add_argument("--mattype", type=str, default="aij")
+parser.add_argument("--galerkin", dest="galerkin", default=False, action ="store_true")
 args, _ = parser.parse_known_args()
 
 
@@ -73,7 +75,7 @@ q = TestFunction(Q)
 bcs = [DirichletBC(V, Constant((0., 0.)), "on_boundary")]
 
 omega = 0.1 #0.4, 0.1
-delta = 200 #10, 200
+delta = 100 #10, 200
 mu_min = Constant(dr**-0.5)
 mu_max = Constant(dr**0.5)
 
@@ -134,24 +136,26 @@ for bc in bcs:
 F += -10 * (chi_n(mesh)-1)*v[1] * dx
 
 if args.discretisation == "hdiv":
-    Fgamma = F + Constant(gamma)*inner(div(u), div(v))*dx(degree=2*(k-1))
+    Fgamma = F + gamma*inner(div(u), div(v))*dx(degree=2*(k-1))
 elif args.discretisation == "cg":
-    Fgamma = F + Constant(gamma)*inner(cell_avg(div(u)), cell_avg(div(v)))*dx(degree=2*(k-1))
+    Fgamma = F + gamma*inner(cell_avg(div(u)), cell_avg(div(v)))*dx(degree=2*(k-1))
 else:
     raise ValueError("please specify hdiv or cg for --discretisation")
 
 a = lhs(Fgamma)
 l = rhs(Fgamma)
 
+
 common = {
     "snes_type": "ksponly",
-    "mat_type": "aij",
-    "pmat_type":"aij",
+    "mat_type": args.mattype,
+    "pmat_type": args.mattype,
     "ksp_type": "fgmres",
+    "ksp_gmres_restart ": 300,
     "ksp_norm_type": "unpreconditioned",
     "ksp_rtol": 1.0e-6,
     "ksp_atol": 1.0e-10,
-    "ksp_max_it": 300,
+    "ksp_max_it": 500,
     "ksp_converged_reason": None,
     "ksp_monitor_true_residual": None,
 }
@@ -173,10 +177,16 @@ mg_levels_solver = {
     "pc_python_type": "matpatch.MatPatch",
 }
 
+#mg_levels_solver = {
+#    "ksp_type": "fgmres",
+#    "ksp_norm_type": "unpreconditioned",
+#    "ksp_max_it": 5,
+#    "pc_type": "jacobi",
+#}
+
 solver_mg = {
     "pc_type": "mg",
     "pc_mg_type": "full",
-    #"pc_mg_galerkin": "both",
     "mg_levels": mg_levels_solver,
     "mg_coarse_pc_type": "python",
     "mg_coarse_pc_python_type": "firedrake.AssembledPC",
@@ -196,33 +206,22 @@ else:
 if args.nonzero_initial_guess:
     sol.project(Constant((1., 1.)))
 
-def aug_jacobian(X, J, ctx):
-    mh, level = get_level(ctx._x.ufl_domain())
-    levelmesh = mh[level]
-    if level == 0:
-        assert(ctx._fine._jacobian_assembled)
-        Jfine = ctx._fine._jac.petscmat
 
-        # Galerkin Projection
-        # Get P
-        if args.discretisation == "hdiv":
-            Vc = FunctionSpace(mh[level], "BDM", k)
-            Vf = FunctionSpace(mh[level+1], "BDM", k)
-        elif args.discretisation == "cg":
-            Vc = VectorFunctionSpace(mh[level], "CG", k)
-            Vf = VectorFunctionSpace(mh[level+1], "CG", k)
-        else:
-            raise ValueError("please specify hdiv or cg for --discretisation")
-        ProOp = build_prolongation_matrix(ctx.transfer_manager.prolong, Vc, Vf)
-        Jcoarse = Jfine.PtAP(ProOp)
-        Jcoarse.copy(J)
+def get_prolong():
+    if args.discretisation == "cg":
+        V = Z.sub(0)
+        Q = Z.sub(1)
+        tdim = mesh.topological_dimension()
+        vtransfer = PkP0SchoeberlTransfer((mu, gamma), tdim, hierarchy)
+        return vtransfer.prolong
+    else:
+        return prolong
 
 def get_transfers():
     V = Z.sub(0)
     Q = Z.sub(1)
     tdim = mesh.topological_dimension()
     vtransfer = PkP0SchoeberlTransfer((mu, gamma), tdim, hierarchy)
-    qtransfer = NullTransfer()
     transfers = {V.ufl_element(): (vtransfer.prolong, vtransfer.restrict, inject)}
     return transfers
 
@@ -234,7 +233,7 @@ def build_prolongation_matrix(prolong, V_coarse, V_fine):
     ProOp = PETSc.Mat()
     ProOp.create(PETSc.COMM_WORLD)
     ProOp.setSizes([V_fine.dim(), V_coarse.dim()])
-    ProOp.setType("aij")
+    ProOp.setType(args.mattype)
     ProOp.setUp()
     
 
@@ -247,42 +246,76 @@ def build_prolongation_matrix(prolong, V_coarse, V_fine):
         arr = uc.vector().get_local()
         prolong(uc, uf)
         values = uf.vector().get_local()
-        rows = np.where(abs(values) > 1e-15)[0].astype(np.int32)
+        rows = np.where(np.absolute(values) > 1e-14)[0].astype(np.int32)
         values = values[rows]
         ProOp.setValues(rows, [icol], values)
 
     ProOp.assemblyBegin()
     ProOp.assemblyEnd()
 
-    #viewer = PETSc.Viewer().createASCII("ProOp.txt")
-    #viewer.pushFormat(PETSc.Viewer.Format.ASCII_MATLAB)
-    #ProOp.view(viewer)
+    ## Save the prolongation matrix
+    #viewer = PETSc.Viewer().createBinary("ProOp_"+str(int(V_coarse.dim()))+\
+    #                                     "_dr"+str(int(dr))+\
+    #                                     "_r"+str(int(args.gamma))+\
+    #                                     ".dat",\
+    #                                     PETSc.Viewer.Mode.WRITE)
+    #viewer.pushFormat(viewer.Format.NATIVE)
+    #viewer.view(ProOp)
 
     return ProOp
+
+# Build level operators
+if args.galerkin:
+    levelOps = []
+    M = assemble(a, bcs=bcs, mat_type=args.mattype)
+    Afine = M.petscmat
+    levelOps.append(Afine)
+    level = nref
+    Vf = V
+    while level > 0:
+        print("building level : ", level)
+        Vc = FunctionSpace(mh[level-1], V.ufl_element())
+        prolong = get_prolong()
+        ProOp = build_prolongation_matrix(prolong, Vc, Vf)
+        Acoarse = Afine.PtAP(ProOp)
+        #bclevel = DirichletBC(Vc, Constant((0., 0.)), "on_boundary")
+        #bc_idx = bclevel.nodes
+        #nodes = []
+        #for i in bc_idx:
+        #    nodes.append(2*i)
+        #    nodes.append(2*i+1)
+        #Acoarse.zeroRowsColumns(nodes,diag=1)
+    
+        levelOps.append(Acoarse)
+        Afine = Acoarse
+        Vf = Vc
+        level = level-1
+
+def aug_jacobian(X, J, ctx):
+    mh, level = get_level(ctx._x.ufl_domain())
+    if args.galerkin:
+        rmap, cmap = J.getLGMap()
+        levelOps[nref-level].copy(J,structure=J.Structure.DIFFERENT_NONZERO_PATTERN)
+        J.setLGMap(rmap, cmap)
+        #viewer = PETSc.Viewer().createASCII("LevelOp_"+str(int(level))+\
+        #                                     "_galerkin_J.dat",\
+        #                                     PETSc.Viewer.Mode.WRITE)
+        #viewer.view(J)
+    #else:
+        #viewer = PETSc.Viewer().createASCII("LevelOp_"+str(int(level))+\
+        #                                     ".dat",\
+        #                                     PETSc.Viewer.Mode.WRITE)
+        #viewer.view(J)
 
 for i in range(args.itref+1):
     problem = LinearVariationalProblem(a, l, sol, bcs=bcs)
     solver = LinearVariationalSolver(problem,
                                      solver_parameters=params,
                                      post_jacobian_callback=aug_jacobian)
+
     if args.solver_type == "almg" and args.discretisation == "cg":
         transfermanager = TransferManager(native_transfers=get_transfers())
         solver.set_transfer_manager(transfermanager)
-
-    #pc = solver.snes.getKSP().getPC()
-    #dm = pc.getDM()
-    #V = get_function_space(dm)
-    #hierarchy, level = get_level(V.mesh())
-
-    #Vf = V
-    #while level > 0:
-    #    Vc = FunctionSpace(hierarchy[level-1], V.ufl_element())
-    #    print("level = %d , Vf size = %d, Vc size = %d" %(level, Vf.dim(), Vc.dim()))
-    #    transfer = solver._ctx.transfer_manager
-    #    ProOp = build_prolongation_matrix(transfer.prolong, Vc, Vf)
-    #    #pc.setMGInterpolation(level,ProOp)
-    #    Vf = Vc
-    #    level = level-1
 
     solver.solve()
     with assemble(action(Fgamma, sol), bcs=homogenize(bcs)).dat.vec_ro as v:
