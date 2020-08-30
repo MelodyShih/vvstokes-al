@@ -8,6 +8,9 @@ import argparse
 import numpy as np
 from petsc4py import PETSc
 
+import logging
+logging.basicConfig(level="INFO")
+
 parser = argparse.ArgumentParser(add_help=False)
 parser.add_argument("--nref", type=int, default=1)
 parser.add_argument("--k", type=int, default=2)
@@ -36,6 +39,7 @@ gamma = Constant(args.gamma)
 dim = args.dim
 
 distp = {"partition": True, "overlap_type": (DistributedMeshOverlapType.VERTEX, 1)}
+
 
 hierarchy = "uniform"
 def before(dm, i):
@@ -195,7 +199,11 @@ for bc in bcs:
     bid = bc.sub_domain
     F += nitsche(u, v, mu_expr(mesh), bid, g)
 
-F += - p * div(v) * dx(degree=2*(k-1)) - div(u) * q * dx(degree=2*(k-1))
+if dim == 2:
+    F += - p * div(v) * dx(degree=2*(k-1)) - div(u) * q * dx(degree=2*(k-1))
+elif dim == 3:
+    F += - p * div(v) * dx(degree=3*(k-1)) - div(u) * q * dx(degree=3*(k-1))
+
 F += -10 * (chi_n(mesh)-1)*v[1] * dx
 if args.nonzero_rhs:
     divrhs = SpatialCoordinate(mesh)[0]-2
@@ -207,9 +215,9 @@ if args.quad:
     Fgamma = F + Constant(gamma)*inner(div(u)-divrhs, div(v))*dx(degree=2*(k-1))
 else:
     if args.discretisation == "hdiv":
-        Fgamma = F + Constant(gamma)*inner(div(u)-divrhs, div(v))*dx(degree=2*(k-1))
+        Fgamma = F + Constant(gamma)*inner(div(u)-divrhs, div(v))*dx(degree=3*(k-1))
     elif args.discretisation == "cg":
-        Fgamma = F + Constant(gamma)*inner(cell_avg(div(u))-divrhs, cell_avg(div(v)))*dx(degree=2*(k-1))
+        Fgamma = F + Constant(gamma)*inner(cell_avg(div(u))-divrhs, cell_avg(div(v)))*dx(degree=3*(k-1))
     else:
         raise ValueError("please specify hdiv or cg for --discretisation")
 
@@ -318,7 +326,7 @@ params = {
     "ksp_type": "fgmres",
     "ksp_rtol": 1.0e-6,
     "ksp_atol": 1.0e-10,
-    "ksp_max_it": 200,
+    "ksp_max_it": 300,
     "ksp_monitor_true_residual": None,
     "ksp_converged_reason": None,
     "pc_type": "fieldsplit",
@@ -460,7 +468,8 @@ if args.nonzero_initial_guess:
 
 
 for i in range(args.itref+1):
-    problem = LinearVariationalProblem(a, l, z, bcs=bcs)
+    problem = LinearVariationalProblem(a, l, z, bcs=bcs, 
+                                       form_compiler_parameters=compiler_params)
     solver = LinearVariationalSolver(problem,
                                      solver_parameters=params,
                                      options_prefix="ns_",
