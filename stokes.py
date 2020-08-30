@@ -468,8 +468,7 @@ if args.nonzero_initial_guess:
 
 
 for i in range(args.itref+1):
-    problem = LinearVariationalProblem(a, l, z, bcs=bcs, 
-                                       form_compiler_parameters=compiler_params)
+    problem = LinearVariationalProblem(a, l, z, bcs=bcs)
     solver = LinearVariationalSolver(problem,
                                      solver_parameters=params,
                                      options_prefix="ns_",
