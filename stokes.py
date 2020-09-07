@@ -1,12 +1,14 @@
 from firedrake import *
 from firedrake.petsc import PETSc
 from alfi.transfer import *
+from alfi import *
 from functools import reduce
 from firedrake.mg.utils import get_level
 
 import argparse
 import numpy as np
 from petsc4py import PETSc
+PETSc.Sys.popErrorHandler()
 
 import logging
 logging.basicConfig(level="INFO")
@@ -26,6 +28,7 @@ parser.add_argument("--itref", type=int, default=0)
 parser.add_argument("--w", type=float, default=0.0)
 parser.add_argument("--discretisation", type=str, default="hdiv")
 parser.add_argument("--dim", type=int, default=2)
+parser.add_argument("--quad-deg", type=int, dest="quad_deg", default=8)
 args, _ = parser.parse_known_args()
 
 
@@ -37,6 +40,7 @@ case = args.case
 w = args.w
 gamma = Constant(args.gamma)
 dim = args.dim
+deg = args.quad_deg
 
 distp = {"partition": True, "overlap_type": (DistributedMeshOverlapType.VERTEX, 1)}
 
@@ -175,21 +179,21 @@ n = FacetNormal(mesh)
 
 def diffusion(u, v, mu):
     if args.discretisation == "cg":
-        return (mu*inner(2*sym(grad(u)), grad(v)))*dx
+        return (mu*inner(2*sym(grad(u)), grad(v)))*dx(degree=deg)
     else:
-        return (mu*inner(2*sym(grad(u)), grad(v)))*dx \
-            - mu * inner(avg(2*sym(grad(u))), 2*avg(outer(v, n))) * dS \
-            - mu * inner(avg(2*sym(grad(v))), 2*avg(outer(u, n))) * dS \
-            + mu * sigma/avg(h) * inner(2*avg(outer(u,n)),2*avg(outer(v,n))) * dS
+        return (mu*inner(2*sym(grad(u)), grad(v)))*dx(degree=deg)\
+            - mu * inner(avg(2*sym(grad(u))), 2*avg(outer(v, n))) * dS(degree=deg) \
+            - mu * inner(avg(2*sym(grad(v))), 2*avg(outer(u, n))) * dS(degree=deg) \
+            + mu * sigma/avg(h) * inner(2*avg(outer(u,n)),2*avg(outer(v,n))) * dS(degree=deg)
 
 def nitsche(u, v, mu, bid, g):
     if args.discretisation == "cg":
         return 0
     else:
         my_ds = ds if bid == "on_boundary" else ds(bid)
-        return -inner(outer(v,n),2*mu*sym(grad(u)))*my_ds \
-               -inner(outer(u-g,n),2*mu*sym(grad(v)))*my_ds \
-               +mu*(sigma/h)*inner(v,u-g)*my_ds
+        return -inner(outer(v,n),2*mu*sym(grad(u)))*my_ds(degree=deg) \
+               -inner(outer(u-g,n),2*mu*sym(grad(v)))*my_ds(degree=deg) \
+               +mu*(sigma/h)*inner(v,u-g)*my_ds(degree=deg)
 
 F = diffusion(u, v, mu_expr(mesh))
 for bc in bcs:
@@ -466,8 +470,8 @@ if args.nonzero_initial_guess:
     z.split()[0].project(Constant((1., 1.)))
     z.split()[1].interpolate(SpatialCoordinate(mesh)[1]-2)
 
-
 for i in range(args.itref+1):
+    PETSc.Log.begin()
     problem = LinearVariationalProblem(a, l, z, bcs=bcs)
     solver = LinearVariationalSolver(problem,
                                      solver_parameters=params,
@@ -481,12 +485,14 @@ for i in range(args.itref+1):
             transfermanager = TransferManager(native_transfers=get_transfers())
             solver.set_transfer_manager(transfermanager)
     # Write out solution
+    solver.Z = Z #for calling performance_info
     solver.solve()
-    if case==3 or case==4:
-        with assemble(action(Fgamma, z), bcs=homogenize(bcs)).dat.vec_ro as v:
-            PETSc.Sys.Print('Residual with    grad-div', v.norm())
-        with assemble(action(F, z), bcs=homogenize(bcs)).dat.vec_ro as w:
-            PETSc.Sys.Print('Residual without grad-div', w.norm())
+    performance_info(COMM_WORLD, solver)
+    #if case==3 or case==4:
+    #    with assemble(action(Fgamma, z), bcs=homogenize(bcs)).dat.vec_ro as v:
+    #        PETSc.Sys.Print('Residual with    grad-div', v.norm())
+    #    with assemble(action(F, z), bcs=homogenize(bcs)).dat.vec_ro as w:
+    #        PETSc.Sys.Print('Residual without grad-div', w.norm())
 
 #File("u.pvd").write(z.split()[0])
 # uncomment lines below to write out the solution. then run with --case 3 first
