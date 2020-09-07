@@ -28,7 +28,7 @@ parser.add_argument("--itref", type=int, default=0)
 parser.add_argument("--w", type=float, default=0.0)
 parser.add_argument("--discretisation", type=str, default="hdiv")
 parser.add_argument("--dim", type=int, default=2)
-parser.add_argument("--quad-deg", type=int, dest="quad_deg", default=8)
+parser.add_argument("--quad-deg", type=int, dest="quad_deg", default=20)
 args, _ = parser.parse_known_args()
 
 
