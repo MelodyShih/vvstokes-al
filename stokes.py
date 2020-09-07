@@ -11,7 +11,7 @@ from petsc4py import PETSc
 PETSc.Sys.popErrorHandler()
 
 import logging
-logging.basicConfig(level="INFO")
+#logging.basicConfig(level="INFO")
 
 parser = argparse.ArgumentParser(add_help=False)
 parser.add_argument("--nref", type=int, default=1)
@@ -208,7 +208,7 @@ if dim == 2:
 elif dim == 3:
     F += - p * div(v) * dx(degree=3*(k-1)) - div(u) * q * dx(degree=3*(k-1))
 
-F += -10 * (chi_n(mesh)-1)*v[1] * dx
+F += -10 * (chi_n(mesh)-1)*v[1] * dx(degree=deg)
 if args.nonzero_rhs:
     divrhs = SpatialCoordinate(mesh)[0]-2
 else:
@@ -254,7 +254,7 @@ elif case == 5:
     B = M.M[1, 0].handle
     ptrial = TrialFunction(Q)
     ptest  = TestFunction(Q)
-    W = assemble(Tensor(1.0/mu(mh[-1])*inner(ptrial, ptest)*dx).inv).M[0,0].handle
+    W = assemble(Tensor(1.0/mu(mh[-1])*inner(ptrial, ptest)*dx(degree=deg)).inv).M[0,0].handle
     # W = assemble(Tensor(inner(ptrial, ptest)*dx).inv).M[0,0].handle
     BTW = B.transposeMatMult(W)
     BTW *= args.gamma
@@ -367,7 +367,7 @@ else:
     raise ValueError("please specify almg, allu or alamg for --solver-type")
 
 mu_fun= mu(mh[-1])
-appctx = {"nu": mu_fun, "gamma": gamma, "dr":dr, "case":case, "w":w}
+appctx = {"nu": mu_fun, "gamma": gamma, "dr":dr, "case":case, "w":w, "deg":deg}
 
 # Solve Stoke's equation
 def aug_jacobian(X, J, ctx):
@@ -418,7 +418,7 @@ def aug_jacobian(X, J, ctx):
             Wlevel = assemble(Tensor(inner(ptrial, ptest)*dx).inv).M[0,0].handle
         if case == 5:
             Wlevel = assemble(Tensor(1.0/mu(levelmesh)*inner(ptrial, ptest)*\
-                    dx).inv).M[0,0].handle
+                    dx(degree=deg)).inv).M[0,0].handle
 
         # Form BTWB
         BTWlevel = Blevel.transposeMatMult(Wlevel)
