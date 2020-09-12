@@ -49,9 +49,13 @@ hierarchy = "uniform"
 def before(dm, i):
      for p in range(*dm.getHeightStratum(1)):
          dm.setLabelValue("prolongation", p, i+1)
+     for p in range(*dm.getDepthStratum(0)):
+         dm.setLabelValue("prolongation", p, i+1)
 
 def after(dm, i):
      for p in range(*dm.getHeightStratum(1)):
+         dm.setLabelValue("prolongation", p, i+2)
+     for p in range(*dm.getDepthStratum(0)):
          dm.setLabelValue("prolongation", p, i+2)
 
 def mesh_hierarchy(hierarchy, nref, callbacks, distribution_parameters):
