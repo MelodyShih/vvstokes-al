@@ -4,6 +4,7 @@ from alfi.transfer import *
 from alfi import *
 from functools import reduce
 from firedrake.mg.utils import get_level
+from balance import load_balance, rebalance
 
 import argparse
 import numpy as np
@@ -29,6 +30,7 @@ parser.add_argument("--w", type=float, default=0.0)
 parser.add_argument("--discretisation", type=str, default="hdiv")
 parser.add_argument("--dim", type=int, default=2)
 parser.add_argument("--quad-deg", type=int, dest="quad_deg", default=20)
+parser.add_argument("--rebalance", dest="rebalance", default=False, action="store_true")
 args, _ = parser.parse_known_args()
 
 
@@ -57,6 +59,8 @@ def after(dm, i):
          dm.setLabelValue("prolongation", p, i+2)
      for p in range(*dm.getDepthStratum(0)):
          dm.setLabelValue("prolongation", p, i+2)
+     if args.rebalance:
+         rebalance(dm, i)
 
 def mesh_hierarchy(hierarchy, nref, callbacks, distribution_parameters):
     if dim == 2:
@@ -74,7 +78,8 @@ def mesh_hierarchy(hierarchy, nref, callbacks, distribution_parameters):
         raise NotImplementedError("Only know uniform for the hierarchy.")
     return mh
 mh = mesh_hierarchy(hierarchy, nref, (before, after), distp)
-#mh = MeshHierarchy(mesh, nref, reorder=True, distribution_parameters=distp)
+for mesh in mh:
+    load_balance(mesh)
 
 mesh = mh[-1]
 
@@ -102,9 +107,10 @@ else:
 
 
 Z = V * Q
-PETSc.Sys.Print("dim(Z) = ", Z.dim())
-PETSc.Sys.Print("dim(V) = ", V.dim())
-PETSc.Sys.Print("dim(Q) = ", Q.dim())
+size = Z.mesh().mpi_comm().size
+PETSc.Sys.Print("dim(Z) = %i (%i per core) " % ( Z.dim(), Z.dim()/size))
+PETSc.Sys.Print("dim(V) = %i (%i per core) " % ( V.dim(), V.dim()/size))
+PETSc.Sys.Print("dim(Q) = %i (%i per core) " % ( Q.dim(), Q.dim()/size))
 z = Function(Z)
 u, p = TrialFunctions(Z)
 v, q = TestFunctions(Z)
@@ -311,7 +317,9 @@ mg_levels_solver = {
     "ksp_norm_type": "unpreconditioned",
     "ksp_max_it": 5,
     "pc_type": "python",
-    "pc_python_type": "matpatch.MatPatch",
+    "pc_python_type": "firedrake.ASMStarPC",
+    "pc_star_construct_dim": 0,
+    "pc_star_backend": "tinyasm",
 }
 
 fieldsplit_0_mg = {
@@ -462,7 +470,7 @@ def get_transfers():
     V = Z.sub(0)
     Q = Z.sub(1)
     tdim = mesh.topological_dimension()
-    vtransfer = PkP0SchoeberlTransfer((mu, gamma), tdim, hierarchy)
+    vtransfer = PkP0SchoeberlTransfer((mu, gamma), tdim, hierarchy, backend='tinyasm', b_matfree=True)
     qtransfer = NullTransfer()
     transfers = {V.ufl_element(): (vtransfer.prolong, vtransfer.restrict, inject),
                  Q.ufl_element(): (prolong, restrict, qtransfer.inject)}
