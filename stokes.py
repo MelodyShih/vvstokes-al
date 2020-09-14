@@ -71,6 +71,20 @@ def mesh_hierarchy(hierarchy, nref, callbacks, distribution_parameters):
     return mh
 mh = mesh_hierarchy(hierarchy, nref, (before, after), distp)
 #mh = MeshHierarchy(mesh, nref, reorder=True, distribution_parameters=distp)
+def load_balance(mesh):
+        Z = FunctionSpace(mesh, "CG", 1)
+        owned_dofs = Z.dof_dset.sizes[1]
+        comm = Z.mesh().mpi_comm()
+        min_owned_dofs = comm.allreduce(owned_dofs, op=MPI.MIN)
+        mean_owned_dofs = np.mean(comm.allgather(owned_dofs))
+        max_owned_dofs = comm.allreduce(owned_dofs, op=MPI.MAX)
+        PETSc.Sys.Print(BLUE % ("Load balance: %i vs %i vs %i (%.3f, %.3f)" % (
+            min_owned_dofs, mean_owned_dofs, max_owned_dofs,
+            max_owned_dofs/mean_owned_dofs, max_owned_dofs/min_owned_dofs
+        )))
+
+for i in range(nref+1):
+	load_balance(mh[i])
 
 mesh = mh[-1]
 
@@ -293,7 +307,7 @@ fieldsplit_0_lu = {
     "ksp_type": "preonly",
     "ksp_max_it": 1,
     "pc_type": "lu",
-    #"pc_factor_mat_solver_type": "superlu_dist",
+    "pc_factor_mat_solver_type": "superlu_dist",
 }
 
 fieldsplit_0_hypre = {
@@ -307,7 +321,9 @@ mg_levels_solver = {
     "ksp_norm_type": "unpreconditioned",
     "ksp_max_it": 5,
     "pc_type": "python",
-    "pc_python_type": "matpatch.MatPatch",
+    "pc_python_type": "firedrake.ASMStarPC",
+    "pc_star_construct_dim": 0,
+    "pc_star_backend": "tinyasm",
 }
 
 fieldsplit_0_mg = {
