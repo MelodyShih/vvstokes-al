@@ -31,6 +31,7 @@ parser.add_argument("--discretisation", type=str, default="hdiv")
 parser.add_argument("--dim", type=int, default=2)
 parser.add_argument("--quad-deg", type=int, dest="quad_deg", default=20)
 parser.add_argument("--rebalance", dest="rebalance", default=False, action="store_true")
+parser.add_argument("--asmbackend", type=str, choices=['tinyasm', 'petscasm'], default="tinyasm")
 args, _ = parser.parse_known_args()
 
 
@@ -49,25 +50,33 @@ distp = {"partition": True, "overlap_type": (DistributedMeshOverlapType.VERTEX, 
 
 hierarchy = "uniform"
 def before(dm, i):
-     for p in range(*dm.getHeightStratum(1)):
-         dm.setLabelValue("prolongation", p, i+1)
-     for p in range(*dm.getDepthStratum(0)):
-         dm.setLabelValue("prolongation", p, i+1)
+    if i == 0 and args.rebalance:
+        rebalance(dm, i) # rebalance the initial coarse mesh
+    for p in range(*dm.getHeightStratum(1)):
+        dm.setLabelValue("prolongation", p, i+1)
+    for p in range(*dm.getDepthStratum(0)):
+        dm.setLabelValue("prolongation", p, i+1)
 
 def after(dm, i):
-     for p in range(*dm.getHeightStratum(1)):
-         dm.setLabelValue("prolongation", p, i+2)
-     for p in range(*dm.getDepthStratum(0)):
-         dm.setLabelValue("prolongation", p, i+2)
-     if args.rebalance:
-         rebalance(dm, i)
+    if args.rebalance:
+        rebalance(dm, i) # rebalance all refined meshes
+    for p in range(*dm.getHeightStratum(1)):
+        dm.setLabelValue("prolongation", p, i+2)
+    for p in range(*dm.getDepthStratum(0)):
+        dm.setLabelValue("prolongation", p, i+2)
 
 def mesh_hierarchy(hierarchy, nref, callbacks, distribution_parameters):
     if dim == 2:
         baseMesh = RectangleMesh(N, N, 4, 4, distribution_parameters=distp, \
                 quadrilateral=args.quad)
     elif dim == 3:
-        baseMesh = BoxMesh(N, N, N, 4, 4, 4, distribution_parameters=distp)
+        if args.quad:
+            basemesh = RectangleMesh(N, N, 4, 4, distribution_parameters=distp, quadrilateral=True)
+            basemh = MeshHierarchy(basemesh, nref, callbacks=callbacks)
+            mh = ExtrudedMeshHierarchy(basemh, height=4, base_layer=N)
+            return mh
+        else:
+            baseMesh = BoxMesh(N, N, N, 4, 4, 4, distribution_parameters=distp)
     else:
         raise NotImplementedError("Only implemented for dim=2,3")
 
@@ -82,7 +91,7 @@ for mesh in mh:
     load_balance(mesh)
 
 mesh = mh[-1]
-
+File('mesh.pvd').write(mesh)
 if args.discretisation == "hdiv":
     if args.quad:
         V = FunctionSpace(mesh, "RTCF", k)
@@ -92,19 +101,34 @@ if args.discretisation == "hdiv":
         Q = FunctionSpace(mesh, "DG", k-1)
 elif args.discretisation == "cg":
     if dim == 2:
-        V = VectorFunctionSpace(mesh, "CG", k)
-        Q = FunctionSpace(mesh, "DG", 0)
+        if args.quad:
+            V = VectorFunctionSpace(mesh, "CG", k)
+            Q = FunctionSpace(mesh, "DPC", k-1)
+            # Q = FunctionSpace(mesh, "DQ", k-2)
+        else:
+            V = VectorFunctionSpace(mesh, "CG", k)
+            Q = FunctionSpace(mesh, "DG", 0)
     elif dim == 3:
-        Pk = FiniteElement("Lagrange", mesh.ufl_cell(), 2)
-        FB = FiniteElement("FacetBubble", mesh.ufl_cell(), 3)
-        eleu = VectorElement(NodalEnrichedElement(Pk, FB))
-        V = FunctionSpace(mesh, eleu)
-        Q = FunctionSpace(mesh, "DG", 0)
+        if args.quad:
+            horiz_elt = FiniteElement("CG", quadrilateral, k)
+            vert_elt = FiniteElement("CG", interval, k)
+            elt = VectorElement(TensorProductElement(horiz_elt, vert_elt))
+            V = FunctionSpace(mesh, elt)
+            Q = FunctionSpace(mesh, "DPC", k-1)
+            # Q = FunctionSpace(mesh, "DQ", k-2)
+        else:
+            Pk = FiniteElement("Lagrange", mesh.ufl_cell(), k)
+            if k < 3:
+                FB = FiniteElement("FacetBubble", mesh.ufl_cell(), 3)
+                eleu = VectorElement(NodalEnrichedElement(Pk, FB))
+            else:
+                eleu = Pk
+            V = FunctionSpace(mesh, eleu)
+            Q = FunctionSpace(mesh, "DG", 0)
     else:
         raise NotImplementedError("Only implemented for dim=2,3")
 else:
     raise ValueError("please specify hdiv or cg for --discretisation")
-
 
 Z = V * Q
 size = Z.mesh().mpi_comm().size
@@ -114,12 +138,9 @@ PETSc.Sys.Print("dim(Q) = %i (%i per core) " % ( Q.dim(), Q.dim()/size))
 z = Function(Z)
 u, p = TrialFunctions(Z)
 v, q = TestFunctions(Z)
-if dim == 2:
-    bcs = [DirichletBC(Z.sub(0), Constant((0., 0.)), "on_boundary")]
-elif dim == 3:
-    bcs = [DirichletBC(Z.sub(0), Constant((0., 0., 0.)), "on_boundary")]
-else:
-    raise NotImplementedError("Only implemented for dim=2,3")
+bcs = [DirichletBC(Z.sub(0), Constant((0.,) * args.dim), "on_boundary")]
+if dim == 3 and args.quad:
+    bcs += [DirichletBC(Z.sub(0), Constant((0., 0., 0.)), "top"), DirichletBC(Z.sub(0), Constant((0., 0., 0.)), "bottom")]
 
 
 omega = 0.1 #0.4, 0.1
@@ -213,82 +234,49 @@ for bc in bcs:
     bid = bc.sub_domain
     F += nitsche(u, v, mu_expr(mesh), bid, g)
 
-if dim == 2:
-    F += - p * div(v) * dx(degree=2*(k-1)) - div(u) * q * dx(degree=2*(k-1))
-elif dim == 3:
-    F += - p * div(v) * dx(degree=3*(k-1)) - div(u) * q * dx(degree=3*(k-1))
+divdegree = None
+F += - p * div(v) * dx(degree=divdegree) - div(u) * q * dx(degree=divdegree)
 
 F += -10 * (chi_n(mesh)-1)*v[1] * dx(degree=deg)
 if args.nonzero_rhs:
     divrhs = SpatialCoordinate(mesh)[0]-2
 else:
     divrhs = Constant(0)
-F += divrhs * q * dx(degree=2*(k-1))
+F += divrhs * q * dx(degree=divdegree)
 
-if args.quad:
-    Fgamma = F + Constant(gamma)*inner(div(u)-divrhs, div(v))*dx(degree=2*(k-1))
+if args.discretisation == "hdiv":
+    Fgamma = F + Constant(gamma)*inner(div(u)-divrhs, div(v))*dx(degree=divdegree)
+elif args.discretisation == "cg":
+    Fgamma = F + Constant(gamma)*inner(cell_avg(div(u))-divrhs, cell_avg(div(v)))*dx(degree=divdegree, metadata={"mode": "vanilla"})
 else:
-    if args.discretisation == "hdiv":
-        Fgamma = F + Constant(gamma)*inner(div(u)-divrhs, div(v))*dx(degree=3*(k-1))
-    elif args.discretisation == "cg":
-        Fgamma = F + Constant(gamma)*inner(cell_avg(div(u))-divrhs, cell_avg(div(v)))*dx(degree=3*(k-1))
-    else:
-        raise ValueError("please specify hdiv or cg for --discretisation")
+    raise ValueError("please specify hdiv or cg for --discretisation")
 
-if case < 4:
+if case == 3:
     a = lhs(Fgamma)
     l = rhs(Fgamma)
-elif case == 4:
-    # Unaugmented system
-    a = lhs(F)
-    l = rhs(F)
-
-    # Form BTWB
-    M = assemble(a, bcs=bcs)
-    A = M.M[0, 0].handle
-    B = M.M[1, 0].handle
-    ptrial = TrialFunction(Q)
-    ptest  = TestFunction(Q)
-    W = assemble(Tensor(inner(ptrial, ptest)*dx).inv).M[0,0].handle
-    BTW = B.transposeMatMult(W)
-    BTW *= args.gamma
-    BTWB = BTW.matMult(B)
-elif case == 5:
-    # Unaugmented system
-    a = lhs(F)
-    l = rhs(F)
-
-    # Form BTWB
-    M = assemble(a, bcs=bcs)
-    A = M.M[0, 0].handle
-    B = M.M[1, 0].handle
-    ptrial = TrialFunction(Q)
-    ptest  = TestFunction(Q)
-    W = assemble(Tensor(1.0/mu(mh[-1])*inner(ptrial, ptest)*dx(degree=deg)).inv).M[0,0].handle
-    # W = assemble(Tensor(inner(ptrial, ptest)*dx).inv).M[0,0].handle
-    BTW = B.transposeMatMult(W)
-    BTW *= args.gamma
-    BTWB = BTW.matMult(B)
-
-elif case == 6:
-    # Unaugmented system
-    a = lhs(F)
-    l = rhs(F)
-
-    # Form BTWB
-    M = assemble(a, bcs=bcs)
-    A = M.M[0, 0].handle
-    B = M.M[1, 0].handle
-    ptrial = TrialFunction(Q)
-    ptest  = TestFunction(Q)
-    W1 = assemble(Tensor(1.0/mu(mh[-1])*inner(ptrial, ptest)*dx).inv).M[0,0].handle
-    W2 = assemble(Tensor(inner(ptrial, ptest)*dx).inv).M[0,0].handle
-    W = W1*w + W2*(1-w)
-    BTW = B.transposeMatMult(W)
-    BTW *= args.gamma
-    BTWB = BTW.matMult(B)
 else:
-    raise ValueError("Unknown type of preconditioner %i" % case)
+    a = lhs(F)
+    l = rhs(F)
+
+# if case == 6:
+#     # Unaugmented system
+#     a = lhs(F)
+#     l = rhs(F)
+
+#     # Form BTWB
+#     M = assemble(a, bcs=bcs)
+#     A = M.M[0, 0].handle
+#     B = M.M[1, 0].handle
+#     ptrial = TrialFunction(Q)
+#     ptest  = TestFunction(Q)
+#     W1 = assemble(Tensor(1.0/mu(mh[-1])*inner(ptrial, ptest)*dx).inv).M[0,0].handle
+#     W2 = assemble(Tensor(inner(ptrial, ptest)*dx).inv).M[0,0].handle
+#     W = W1*w + W2*(1-w)
+#     BTW = B.transposeMatMult(W)
+#     BTW *= args.gamma
+#     BTWB = BTW.matMult(B)
+# else:
+#     raise ValueError("Unknown type of preconditioner %i" % case)
 
 
 
@@ -313,16 +301,24 @@ fieldsplit_0_hypre = {
 }
 
 mg_levels_solver = {
+    "ksp_monitor": None,
     "ksp_type": "fgmres",
     "ksp_norm_type": "unpreconditioned",
     "ksp_max_it": 5,
     "pc_type": "python",
-    "pc_python_type": "firedrake.ASMStarPC",
+    "pc_python_type": "hexstar.ASMHexStarPC" if (args.dim == 3 and args.quad == True) else "firedrake.ASMStarPC",
     "pc_star_construct_dim": 0,
-    "pc_star_backend": "tinyasm",
+    "pc_star_backend": args.asmbackend,
+    "pc_star_sub_pc_asm_sub_mat_type": "seqaij",
+    "pc_star_sub_sub_pc_factor_mat_solver_type": "umfpack",
+    "pc_hexstar_construct_dim": 0,
+    "pc_hexstar_backend": args.asmbackend,
+    "pc_hexstar_sub_pc_asm_sub_mat_type": "seqaij",
+    "pc_hexstar_sub_sub_pc_factor_mat_solver_type": "umfpack",
 }
 
 fieldsplit_0_mg = {
+    "ksp_monitor": None,
     "ksp_type": "preonly",
     "ksp_norm_type": "unpreconditioned",
     "ksp_convergence_test": "skip",
@@ -342,7 +338,7 @@ params = {
     "ksp_type": "fgmres",
     "ksp_rtol": 1.0e-6,
     "ksp_atol": 1.0e-10,
-    "ksp_max_it": 300,
+    "ksp_max_it": 30,
     "ksp_monitor_true_residual": None,
     "ksp_converged_reason": None,
     "pc_type": "fieldsplit",
@@ -381,85 +377,81 @@ else:
 mu_fun= mu(mh[-1])
 appctx = {"nu": mu_fun, "gamma": gamma, "dr":dr, "case":case, "w":w, "deg":deg}
 
+def A_callback(level, mat=None):
+    levelmesh = mh[level]
+    Vlevel = FunctionSpace(levelmesh, V.ufl_element())
+    tmpu = TrialFunction(Vlevel)
+    tmpv = TestFunction(Vlevel)
+    tmpa = diffusion(tmpu, tmpv, mu_expr(levelmesh))
+    tmpbcs = [DirichletBC(Vlevel, Constant((0.,) * args.dim), "on_boundary")]
+    if args.dim == 3 and args.quad:
+        tmpbcs += [DirichletBC(Vlevel, Constant((0., 0., 0.)), "top"), DirichletBC(Vlevel, Constant((0., 0., 0.)), "bottom")]
+    M = assemble(tmpa, bcs=tmpbcs, tensor=mat)
+    return M
+
+
+BTWB_dict = {} # These are of type PETSc.Mat
+BTW_dict = {} # These are of type PETSc.Mat
+
+for level in range(nref+1):
+    levelmesh = mh[level]
+    Vlevel = FunctionSpace(levelmesh, V.ufl_element())
+    Qlevel = FunctionSpace(levelmesh, Q.ufl_element())
+    Zlevel = Vlevel * Qlevel
+    tmpp = TrialFunction(Qlevel)
+    tmpq = TestFunction(Qlevel)
+    if case in [3, 4]:
+        Wlevel = assemble(Tensor(inner(tmpp, tmpq)*dx).inv).M[0,0].handle
+    elif case == 5:
+        Wlevel = assemble(Tensor(1.0/mu(levelmesh)*inner(tmpp, tmpq)*\
+                                 dx(degree=deg)).inv).M[0,0].handle
+    else:
+        raise ValueError("Augmented Jacobian (case %d) not implemented yet" % case)
+
+    tmpu, tmpp = TrialFunctions(Zlevel)
+    tmpv, tmpq = TestFunctions(Zlevel)
+    tmpbcs = [DirichletBC(Zlevel.sub(0), Constant((0.,) * args.dim), "on_boundary")]
+    if args.dim == 3 and args.quad:
+        tmpbcs += [DirichletBC(Zlevel.sub(0), Constant((0., 0., 0.)), "top"), DirichletBC(Zlevel.sub(0), Constant((0., 0., 0.)), "bottom")]
+    Blevel =  assemble(- tmpq * div(tmpu) * dx(degree=divdegree), bcs=tmpbcs).M[1, 0].handle
+    if level in BTW_dict:
+        BTWlevel = Blevel.transposeMatMult(Wlevel, result=BTW_dict[level])
+    else:
+        BTWlevel = Blevel.transposeMatMult(Wlevel)
+        BTW_dict[level] = BTWlevel
+    BTWlevel *= args.gamma
+    if level in BTWB_dict:
+        BTWBlevel = BTWlevel.matMult(Blevel, result=BTWB_dict[level])
+    else:
+        BTWBlevel = BTWlevel.matMult(Blevel)
+        BTWB_dict[level] = BTWBlevel
+
+def BTWB_callback(level, mat=None):
+    return BTWB_dict[level]
+
 # Solve Stoke's equation
 def aug_jacobian(X, J, ctx):
     mh, level = get_level(ctx._x.ufl_domain())
-    levelmesh = mh[level]
-    if case == 4 or case == 5:
-        levelmesh = mh[level]
-        if args.discretisation == "hdiv":
-            if args.quad:
-                Vlevel = FunctionSpace(mesh, "RTCF", k)
-                Qlevel = FunctionSpace(mesh, "DQ", k-1)
-            else:
-                Vlevel = FunctionSpace(levelmesh, "BDM", k)
-                Qlevel = FunctionSpace(levelmesh, "DG", k-1)
-        elif args.discretisation == "cg":
-            if dim == 2:
-                Vlevel = VectorFunctionSpace(levelmesh, "CG", k)
-                Qlevel = FunctionSpace(levelmesh, "DG", 0)
-            elif dim == 3:
-                Pklevel = FiniteElement("Lagrange", levelmesh.ufl_cell(), 2)
-                FBlevel = FiniteElement("FacetBubble", levelmesh.ufl_cell(), 3)
-                eleulevel = VectorElement(NodalEnrichedElement(Pklevel, FBlevel))
-                Vlevel = FunctionSpace(levelmesh, eleulevel)
-                Qlevel = FunctionSpace(levelmesh, "DG", 0)
-            else:
-                raise NotImplementedError("Only implemented for dim=2,3")
-        else:
-            raise ValueError("please specify hdiv or cg for --discretisation")
-        Zlevel = Vlevel * Qlevel
-        # Get B
-        tmpu, tmpp = TrialFunctions(Zlevel)
-        tmpv, tmpq = TestFunctions(Zlevel)
-        tmpF = -tmpq * div(tmpu) * dx
-        if dim == 2:
-            tmpbcs = [DirichletBC(Zlevel.sub(0), Constant((0., 0.)), "on_boundary")]
-        elif dim == 3:
-            tmpbcs = [DirichletBC(Zlevel.sub(0), Constant((0., 0., 0.)), "on_boundary")]
-        else:
-            raise NotImplementedError("Only implemented for dim=2,3")
-        tmpa = lhs(tmpF)
-        M = assemble(tmpa, bcs=tmpbcs)
-        Blevel = M.M[1, 0].handle
-
-        # Get W
-        ptrial = TrialFunction(Qlevel)
-        ptest  = TestFunction(Qlevel)
-        if case == 4:
-            Wlevel = assemble(Tensor(inner(ptrial, ptest)*dx).inv).M[0,0].handle
-        if case == 5:
-            Wlevel = assemble(Tensor(1.0/mu(levelmesh)*inner(ptrial, ptest)*\
-                    dx(degree=deg)).inv).M[0,0].handle
-
-        # Form BTWB
-        BTWlevel = Blevel.transposeMatMult(Wlevel)
-        BTWlevel *= args.gamma
-        BTWBlevel = BTWlevel.matMult(Blevel)
-
+    if case in [4, 5, 6]:
+        BTWBlevel = BTWB_dict[level]
         if level == nref:
-            vel_is = Z._ises[0]
-            Jsub = J.getLocalSubMatrix(vel_is, vel_is)
-            if args.discretisation == "hdiv":
-                Jsub.axpy(1, BTWBlevel, structure=Jsub.Structure.SUBSET_NONZERO_PATTERN)
-            elif args.discretisation == "cg":
-                Jsub.axpy(1, BTWBlevel)
-            J.restoreLocalSubMatrix(vel_is, vel_is, Jsub)
+            Jsub = J.getNestSubMatrix(0, 0)
+            rmap, cmap = Jsub.getLGMap()
+            Jsub.axpy(1, BTWBlevel, Jsub.Structure.SUBSET_NONZERO_PATTERN)
+            Jsub.setLGMap(rmap, cmap)
         else:
-            if args.discretisation == "hdiv":
-                J.axpy(1, BTWBlevel, structure=J.Structure.SUBSET_NONZERO_PATTERN)
-            elif args.discretisation == "cg":
-                J.axpy(1, BTWBlevel)
-    elif case == 6:
-        raise ValueError("Augmented Jacobian (case %d) not implemented yet" % case)
+            rmap, cmap = J.getLGMap()
+            J.axpy(1, BTWBlevel, J.Structure.SUBSET_NONZERO_PATTERN)
+            J.setLGMap(rmap, cmap)
 
 
 def modify_residual(X, F):
-    if case == 4 or case == 5 or case == 6:
+    if case in [4, 5, 6]:
         vel_is = Z._ises[0]
         pre_is = Z._ises[1]
         Fvel = F.getSubVector(vel_is)
         Fpre = F.getSubVector(pre_is)
+        BTW = BTW_dict[nref]
         Fvel += BTW*Fpre
         F.restoreSubVector(vel_is, Fvel)
         F.restoreSubVector(pre_is, Fpre)
@@ -470,7 +462,12 @@ def get_transfers():
     V = Z.sub(0)
     Q = Z.sub(1)
     tdim = mesh.topological_dimension()
-    vtransfer = PkP0SchoeberlTransfer((mu, gamma), tdim, hierarchy, backend='tinyasm', b_matfree=True)
+    if case == 3:
+        # vtransfer = PkP0SchoeberlTransfer((mu, gamma), tdim, hierarchy, backend='tinyasm', b_matfree=False, hexmesh=(args.dim == 3 and args.quad))
+        vtransfer = PkP0SchoeberlTransfer((mu, gamma), tdim, hierarchy, backend='pcpatch', b_matfree=False, hexmesh=(args.dim == 3 and args.quad))
+    else:
+        # vtransfer = AlgebraicSchoeberlTransfer((mu, gamma), A_callback, BTWB_callback, tdim, 'uniform', backend='lu', hexmesh=(args.dim == 3 and args.quad))
+        vtransfer = AlgebraicSchoeberlTransfer((mu, gamma), A_callback, BTWB_callback, tdim, 'uniform', backend=args.asmbackend, hexmesh=(args.dim == 3 and args.quad))
     qtransfer = NullTransfer()
     transfers = {V.ufl_element(): (vtransfer.prolong, vtransfer.restrict, inject),
                  Q.ufl_element(): (prolong, restrict, qtransfer.inject)}
@@ -505,7 +502,7 @@ for i in range(args.itref+1):
     #    with assemble(action(F, z), bcs=homogenize(bcs)).dat.vec_ro as w:
     #        PETSc.Sys.Print('Residual without grad-div', w.norm())
 
-#File("u.pvd").write(z.split()[0])
+File("u.pvd").write(z.split()[0])
 # uncomment lines below to write out the solution. then run with --case 3 first
 # and then with --case 4 after to make sure that the 'manual/triple matrix
 # product' augmented lagrangian implementation does the same thing as the
