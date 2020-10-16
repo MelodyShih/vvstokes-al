@@ -301,7 +301,7 @@ fieldsplit_0_hypre = {
 }
 
 mg_levels_solver = {
-    "ksp_monitor": None,
+    # "ksp_monitor_true_residual": None,
     "ksp_type": "fgmres",
     "ksp_norm_type": "unpreconditioned",
     "ksp_max_it": 5,
@@ -309,16 +309,15 @@ mg_levels_solver = {
     "pc_python_type": "hexstar.ASMHexStarPC" if (args.dim == 3 and args.quad == True) else "firedrake.ASMStarPC",
     "pc_star_construct_dim": 0,
     "pc_star_backend": args.asmbackend,
-    "pc_star_sub_pc_asm_sub_mat_type": "seqaij",
-    "pc_star_sub_sub_pc_factor_mat_solver_type": "umfpack",
+    # "pc_star_sub_pc_asm_sub_mat_type": "seqaij",
+    # "pc_star_sub_sub_pc_factor_mat_solver_type": "umfpack",
     "pc_hexstar_construct_dim": 0,
     "pc_hexstar_backend": args.asmbackend,
-    "pc_hexstar_sub_pc_asm_sub_mat_type": "seqaij",
-    "pc_hexstar_sub_sub_pc_factor_mat_solver_type": "umfpack",
+    # "pc_hexstar_sub_pc_asm_sub_mat_type": "seqaij",
+    # "pc_hexstar_sub_sub_pc_factor_mat_solver_type": "umfpack",
 }
 
 fieldsplit_0_mg = {
-    "ksp_monitor": None,
     "ksp_type": "preonly",
     "ksp_norm_type": "unpreconditioned",
     "ksp_convergence_test": "skip",
@@ -338,7 +337,7 @@ params = {
     "ksp_type": "fgmres",
     "ksp_rtol": 1.0e-6,
     "ksp_atol": 1.0e-10,
-    "ksp_max_it": 30,
+    "ksp_max_it": 100,
     "ksp_monitor_true_residual": None,
     "ksp_converged_reason": None,
     "pc_type": "fieldsplit",
@@ -382,7 +381,7 @@ def A_callback(level, mat=None):
     Vlevel = FunctionSpace(levelmesh, V.ufl_element())
     tmpu = TrialFunction(Vlevel)
     tmpv = TestFunction(Vlevel)
-    tmpa = diffusion(tmpu, tmpv, mu_expr(levelmesh))
+    tmpa = diffusion(tmpu, tmpv, mu(levelmesh))
     tmpbcs = [DirichletBC(Vlevel, Constant((0.,) * args.dim), "on_boundary")]
     if args.dim == 3 and args.quad:
         tmpbcs += [DirichletBC(Vlevel, Constant((0., 0., 0.)), "top"), DirichletBC(Vlevel, Constant((0., 0., 0.)), "bottom")]
@@ -390,8 +389,9 @@ def A_callback(level, mat=None):
     return M
 
 
+BBCTWB_dict = {} # These are of type PETSc.Mat
 BTWB_dict = {} # These are of type PETSc.Mat
-BTW_dict = {} # These are of type PETSc.Mat
+BBCTW_dict = {} # These are of type PETSc.Mat
 
 for level in range(nref+1):
     levelmesh = mh[level]
@@ -413,17 +413,23 @@ for level in range(nref+1):
     tmpbcs = [DirichletBC(Zlevel.sub(0), Constant((0.,) * args.dim), "on_boundary")]
     if args.dim == 3 and args.quad:
         tmpbcs += [DirichletBC(Zlevel.sub(0), Constant((0., 0., 0.)), "top"), DirichletBC(Zlevel.sub(0), Constant((0., 0., 0.)), "bottom")]
-    Blevel =  assemble(- tmpq * div(tmpu) * dx(degree=divdegree), bcs=tmpbcs, mat_type='nest').petscmat.getNestSubMatrix(1, 0)
-    if level in BTW_dict:
-        BTWlevel = Blevel.transposeMatMult(Wlevel, result=BTW_dict[level])
+    BBClevel =  assemble(- tmpq * div(tmpu) * dx(degree=divdegree), bcs=tmpbcs, mat_type='nest').petscmat.getNestSubMatrix(1, 0)
+    Wlevel *= gamma
+    if level in BBCTW_dict:
+        BBCTWlevel = BBClevel.transposeMatMult(Wlevel, result=BBCTW_dict[level])
     else:
-        BTWlevel = Blevel.transposeMatMult(Wlevel)
-        BTW_dict[level] = BTWlevel
-    BTWlevel *= args.gamma
+        BBCTWlevel = BBClevel.transposeMatMult(Wlevel)
+        BBCTW_dict[level] = BBCTWlevel
+    if level in BBCTWB_dict:
+        BBCTWBlevel = BBCTWlevel.matMult(BBClevel, result=BBCTWB_dict[level])
+    else:
+        BBCTWBlevel = BBCTWlevel.matMult(BBClevel)
+        BBCTWB_dict[level] = BBCTWBlevel
+    Blevel =  assemble(- tmpq * div(tmpu) * dx(degree=divdegree), mat_type='nest').petscmat.getNestSubMatrix(1, 0)
     if level in BTWB_dict:
-        BTWBlevel = BTWlevel.matMult(Blevel, result=BTWB_dict[level])
+        BTWBlevel = Wlevel.PtAP(Blevel, result=BTWB_dict[level])
     else:
-        BTWBlevel = BTWlevel.matMult(Blevel)
+        BTWBlevel = Wlevel.PtAP(Blevel)
         BTWB_dict[level] = BTWBlevel
 
 def BTWB_callback(level, mat=None):
@@ -433,7 +439,7 @@ def BTWB_callback(level, mat=None):
 def aug_jacobian(X, J, ctx):
     mh, level = get_level(ctx._x.ufl_domain())
     if case in [4, 5, 6]:
-        BTWBlevel = BTWB_dict[level]
+        BTWBlevel = BBCTWB_dict[level]
         if level == nref:
             Jsub = J.getNestSubMatrix(0, 0)
             rmap, cmap = Jsub.getLGMap()
@@ -451,7 +457,7 @@ def modify_residual(X, F):
         pre_is = Z._ises[1]
         Fvel = F.getSubVector(vel_is)
         Fpre = F.getSubVector(pre_is)
-        BTW = BTW_dict[nref]
+        BTW = BBCTW_dict[nref]
         Fvel += BTW*Fpre
         F.restoreSubVector(vel_is, Fvel)
         F.restoreSubVector(pre_is, Fpre)
