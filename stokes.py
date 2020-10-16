@@ -401,10 +401,10 @@ for level in range(nref+1):
     tmpp = TrialFunction(Qlevel)
     tmpq = TestFunction(Qlevel)
     if case in [3, 4]:
-        Wlevel = assemble(Tensor(inner(tmpp, tmpq)*dx).inv).M[0,0].handle
+        Wlevel = assemble(Tensor(inner(tmpp, tmpq)*dx).inv, mat_type='aij').petscmat
     elif case == 5:
         Wlevel = assemble(Tensor(1.0/mu(levelmesh)*inner(tmpp, tmpq)*\
-                                 dx(degree=deg)).inv).M[0,0].handle
+                                 dx(degree=deg)).inv, mat_type='aij').petscmat
     else:
         raise ValueError("Augmented Jacobian (case %d) not implemented yet" % case)
 
@@ -413,7 +413,7 @@ for level in range(nref+1):
     tmpbcs = [DirichletBC(Zlevel.sub(0), Constant((0.,) * args.dim), "on_boundary")]
     if args.dim == 3 and args.quad:
         tmpbcs += [DirichletBC(Zlevel.sub(0), Constant((0., 0., 0.)), "top"), DirichletBC(Zlevel.sub(0), Constant((0., 0., 0.)), "bottom")]
-    Blevel =  assemble(- tmpq * div(tmpu) * dx(degree=divdegree), bcs=tmpbcs).M[1, 0].handle
+    Blevel =  assemble(- tmpq * div(tmpu) * dx(degree=divdegree), bcs=tmpbcs, mat_type='nest').petscmat.getNestSubMatrix(1, 0)
     if level in BTW_dict:
         BTWlevel = Blevel.transposeMatMult(Wlevel, result=BTW_dict[level])
     else:
