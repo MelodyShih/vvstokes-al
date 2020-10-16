@@ -10,7 +10,8 @@ class DGMassInv(PCBase):
         u = TrialFunction(V)
         v = TestFunction(V)
 
-        nu    = appctx["nu"]
+        nu_fun    = appctx["nu_fun"]
+        nu_expr    = appctx["nu_expr"]
         gamma = appctx["gamma"]
         dr    = appctx["dr"]
         case  = appctx["case"]
@@ -26,39 +27,39 @@ class DGMassInv(PCBase):
         if case == 0:
             massinv = assemble(Tensor(inner(u, v)*dx).inv)
             self.massinv = massinv.petscmat
-            self.scale = nu.copy(deepcopy=True)
+            self.scale = nu_fun.copy(deepcopy=True)
             self.scale.project(-(1.0+gamma))
         elif case == 1:
             massinv = assemble(Tensor(inner(u, v)*dx).inv)
             self.massinv = massinv.petscmat
-            self.scale = nu.copy(deepcopy=True)
-            self.scale.project(-(nu+gamma))
+            self.scale = nu_fun.copy(deepcopy=True)
+            self.scale.project(-(nu_fun+gamma))
         elif case == 2:
             massinv = assemble(Tensor(inner(u, v)*dx).inv)
             self.massinv = massinv.petscmat
-            self.scale = nu.copy(deepcopy=True)
+            self.scale = nu_fun.copy(deepcopy=True)
             self.scale.project(-(sqrt(dr)+gamma))
         elif case == 3 or case == 4:
-            viscmassinv = assemble(Tensor(-1.0/nu*inner(u, v)*dx(degree=deg)).inv)
+            viscmassinv = assemble(Tensor(-1.0/nu_expr*inner(u, v)*dx(degree=deg)).inv)
             massinv = assemble(Tensor(inner(u, v)*dx).inv)
             self.viscmassinv = viscmassinv.petscmat
             self.massinv = massinv.petscmat
-            self.scale = nu.copy(deepcopy=True)
+            self.scale = nu_fun.copy(deepcopy=True)
             self.scale.project(-gamma)
         elif case == 5:
-            viscmassinv = assemble(Tensor(-1.0/nu*inner(u, v)*dx(degree=deg)).inv)
+            viscmassinv = assemble(Tensor(-1.0/nu_expr*inner(u, v)*dx(degree=deg)).inv)
             self.viscmassinv = viscmassinv.petscmat
-            self.scale = nu.copy(deepcopy=True)
+            self.scale = nu_fun.copy(deepcopy=True)
             self.scale.project(1.0+gamma)
         elif case == 6:
             ## P = Shat - gamma*W
             # Shat = -viscmassinv
             # W = w*viscmassinv + (1-w)*massinv
             massinv     = assemble(Tensor(inner(u, v)*dx).inv)
-            viscmassinv = assemble(Tensor(1.0/nu*inner(u, v)*dx(degree=deg)).inv)
+            viscmassinv = assemble(Tensor(1.0/nu_expr*inner(u, v)*dx(degree=deg)).inv)
             self.viscmassinv = viscmassinv.petscmat
             self.massinv     = massinv.petscmat
-            self.scale = nu.copy(deepcopy=True)
+            self.scale = nu_fun.copy(deepcopy=True)
             self.scale.project(-gamma)
             self.w = w
         else:

@@ -193,6 +193,7 @@ def mu(mesh):
     Qm = FunctionSpace(mesh, Q.ufl_element())
     return Function(Qm).interpolate(mu_expr(mesh))
 
+mu_transfer = mu_expr
 #File("mu_"+str(N)+"_delta_"+str(delta)+".pvd").write(mu(mesh))
 
 sigma = Constant(100.)
@@ -257,27 +258,6 @@ if case == 3:
 else:
     a = lhs(F)
     l = rhs(F)
-
-# if case == 6:
-#     # Unaugmented system
-#     a = lhs(F)
-#     l = rhs(F)
-
-#     # Form BTWB
-#     M = assemble(a, bcs=bcs)
-#     A = M.M[0, 0].handle
-#     B = M.M[1, 0].handle
-#     ptrial = TrialFunction(Q)
-#     ptest  = TestFunction(Q)
-#     W1 = assemble(Tensor(1.0/mu(mh[-1])*inner(ptrial, ptest)*dx).inv).M[0,0].handle
-#     W2 = assemble(Tensor(inner(ptrial, ptest)*dx).inv).M[0,0].handle
-#     W = W1*w + W2*(1-w)
-#     BTW = B.transposeMatMult(W)
-#     BTW *= args.gamma
-#     BTWB = BTW.matMult(B)
-# else:
-#     raise ValueError("Unknown type of preconditioner %i" % case)
-
 
 
 fieldsplit_1 = {
@@ -374,14 +354,14 @@ else:
     raise ValueError("please specify almg, allu or alamg for --solver-type")
 
 mu_fun= mu(mh[-1])
-appctx = {"nu": mu_fun, "gamma": gamma, "dr":dr, "case":case, "w":w, "deg":deg}
+appctx = {"nu_fun": mu_fun, "nu_expr": mu_expr(mh[-1]), "gamma": gamma, "dr":dr, "case":case, "w":w, "deg":deg}
 
 def A_callback(level, mat=None):
     levelmesh = mh[level]
     Vlevel = FunctionSpace(levelmesh, V.ufl_element())
     tmpu = TrialFunction(Vlevel)
     tmpv = TestFunction(Vlevel)
-    tmpa = diffusion(tmpu, tmpv, mu(levelmesh))
+    tmpa = diffusion(tmpu, tmpv, mu_transfer(levelmesh))
     tmpbcs = [DirichletBC(Vlevel, Constant((0.,) * args.dim), "on_boundary")]
     if args.dim == 3 and args.quad:
         tmpbcs += [DirichletBC(Vlevel, Constant((0., 0., 0.)), "top"), DirichletBC(Vlevel, Constant((0., 0., 0.)), "bottom")]
@@ -403,8 +383,10 @@ for level in range(nref+1):
     if case in [3, 4]:
         Wlevel = assemble(Tensor(inner(tmpp, tmpq)*dx).inv, mat_type='aij').petscmat
     elif case == 5:
-        Wlevel = assemble(Tensor(1.0/mu(levelmesh)*inner(tmpp, tmpq)*\
+        Wlevel = assemble(Tensor(1.0/mu_expr(levelmesh)*inner(tmpp, tmpq)*\
                                  dx(degree=deg)).inv, mat_type='aij').petscmat
+    elif case == 6:
+        Wlevel = w*assemble(Tensor(1.0/mu_expr(levelmesh)*inner(tmpp, tmpq)*dx).inv).petscmat + (1-w)*assemble(Tensor(inner(tmpp, tmpq)*dx).inv).petscmat
     else:
         raise ValueError("Augmented Jacobian (case %d) not implemented yet" % case)
 
@@ -469,11 +451,11 @@ def get_transfers():
     Q = Z.sub(1)
     tdim = mesh.topological_dimension()
     if case == 3:
-        # vtransfer = PkP0SchoeberlTransfer((mu, gamma), tdim, hierarchy, backend='tinyasm', b_matfree=False, hexmesh=(args.dim == 3 and args.quad))
-        vtransfer = PkP0SchoeberlTransfer((mu, gamma), tdim, hierarchy, backend='pcpatch', b_matfree=False, hexmesh=(args.dim == 3 and args.quad))
+        # vtransfer = PkP0SchoeberlTransfer((mu_transfer, gamma), tdim, hierarchy, backend='pcpatch', b_matfree=True, hexmesh=(args.dim == 3 and args.quad))
+        vtransfer = PkP0SchoeberlTransfer((mu_transfer, gamma), tdim, hierarchy, backend=args.asmbackend, b_matfree=True, hexmesh=(args.dim == 3 and args.quad))
     else:
-        # vtransfer = AlgebraicSchoeberlTransfer((mu, gamma), A_callback, BTWB_callback, tdim, 'uniform', backend='lu', hexmesh=(args.dim == 3 and args.quad))
-        vtransfer = AlgebraicSchoeberlTransfer((mu, gamma), A_callback, BTWB_callback, tdim, 'uniform', backend=args.asmbackend, hexmesh=(args.dim == 3 and args.quad))
+        # vtransfer = AlgebraicSchoeberlTransfer((mu_transfer, gamma), A_callback, BTWB_callback, tdim, 'uniform', backend='lu', hexmesh=(args.dim == 3 and args.quad))
+        vtransfer = AlgebraicSchoeberlTransfer((mu_transfer, gamma), A_callback, BTWB_callback, tdim, 'uniform', backend=args.asmbackend, hexmesh=(args.dim == 3 and args.quad))
     qtransfer = NullTransfer()
     transfers = {V.ufl_element(): (vtransfer.prolong, vtransfer.restrict, inject),
                  Q.ufl_element(): (prolong, restrict, qtransfer.inject)}
