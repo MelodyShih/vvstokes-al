@@ -52,6 +52,9 @@ hierarchy = "uniform"
 def before(dm, i):
     if i == 0 and args.rebalance:
         rebalance(dm, i) # rebalance the initial coarse mesh
+    if dim == 3:
+        for p in range(*dm.getHeightStratum(2)):
+            dm.setLabelValue("prolongation", p, i+1)
     for p in range(*dm.getHeightStratum(1)):
         dm.setLabelValue("prolongation", p, i+1)
     for p in range(*dm.getDepthStratum(0)):
@@ -60,6 +63,9 @@ def before(dm, i):
 def after(dm, i):
     if args.rebalance:
         rebalance(dm, i) # rebalance all refined meshes
+    if dim == 3:
+        for p in range(*dm.getHeightStratum(2)):
+            dm.setLabelValue("prolongation", p, i+2)
     for p in range(*dm.getHeightStratum(1)):
         dm.setLabelValue("prolongation", p, i+2)
     for p in range(*dm.getDepthStratum(0)):
