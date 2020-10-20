@@ -128,7 +128,7 @@ elif args.discretisation == "cg":
                 FB = FiniteElement("FacetBubble", mesh.ufl_cell(), 3)
                 eleu = VectorElement(NodalEnrichedElement(Pk, FB))
             else:
-                eleu = Pk
+                eleu = VectorElement(Pk)
             V = FunctionSpace(mesh, eleu)
             Q = FunctionSpace(mesh, "DG", 0)
     else:
