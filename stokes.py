@@ -297,8 +297,10 @@ mg_levels_solver = {
     "pc_star_backend": args.asmbackend,
     # "pc_star_sub_pc_asm_sub_mat_type": "seqaij",
     # "pc_star_sub_sub_pc_factor_mat_solver_type": "umfpack",
+    "pc_star_sub_sub_pc_factor_in_place": None,
     "pc_hexstar_construct_dim": 0,
     "pc_hexstar_backend": args.asmbackend,
+    "pc_hexstar_sub_sub_pc_factor_in_place": None,
     # "pc_hexstar_sub_pc_asm_sub_mat_type": "seqaij",
     # "pc_hexstar_sub_sub_pc_factor_mat_solver_type": "umfpack",
 }
@@ -362,21 +364,8 @@ else:
 mu_fun= mu(mh[-1])
 appctx = {"nu_fun": mu_fun, "nu_expr": mu_expr(mh[-1]), "gamma": gamma, "dr":dr, "case":case, "w":w, "deg":deg}
 
-def A_callback(level, mat=None):
-    levelmesh = mh[level]
-    Vlevel = FunctionSpace(levelmesh, V.ufl_element())
-    tmpu = TrialFunction(Vlevel)
-    tmpv = TestFunction(Vlevel)
-    tmpa = diffusion(tmpu, tmpv, mu_transfer(levelmesh))
-    tmpbcs = [DirichletBC(Vlevel, Constant((0.,) * args.dim), "on_boundary")]
-    if args.dim == 3 and args.quad:
-        tmpbcs += [DirichletBC(Vlevel, Constant((0., 0., 0.)), "top"), DirichletBC(Vlevel, Constant((0., 0., 0.)), "bottom")]
-    M = assemble(tmpa, bcs=tmpbcs, tensor=mat)
-    return M
-
 
 BBCTWB_dict = {} # These are of type PETSc.Mat
-BTWB_dict = {} # These are of type PETSc.Mat
 BBCTW_dict = {} # These are of type PETSc.Mat
 
 for level in range(nref+1):
@@ -413,15 +402,44 @@ for level in range(nref+1):
     else:
         BBCTWBlevel = BBCTWlevel.matMult(BBClevel)
         BBCTWB_dict[level] = BBCTWBlevel
-    Blevel =  assemble(- tmpq * div(tmpu) * dx(degree=divdegree), mat_type='nest').petscmat.getNestSubMatrix(1, 0)
-    if level in BTWB_dict:
-        BTWBlevel = Wlevel.PtAP(Blevel, result=BTWB_dict[level])
-    else:
-        BTWBlevel = Wlevel.PtAP(Blevel)
-        BTWB_dict[level] = BTWBlevel
 
-def BTWB_callback(level, mat=None):
-    return BTWB_dict[level]
+if not case == 3:
+    for level in range(nref+1):
+        levelmesh = mh[level]
+        Vlevel = FunctionSpace(levelmesh, V.ufl_element())
+        Qlevel = FunctionSpace(levelmesh, Q.ufl_element())
+        Zlevel = Vlevel * Qlevel
+        tmpp = TrialFunction(Qlevel)
+        tmpq = TestFunction(Qlevel)
+        if case == 4:
+            Wlevel = assemble(Tensor(inner(tmpp, tmpq)*dx).inv, mat_type='aij').petscmat
+        elif case == 5:
+            Wlevel = assemble(Tensor(1.0/mu_expr(levelmesh)*inner(tmpp, tmpq)*\
+                                     dx(degree=deg)).inv, mat_type='aij').petscmat
+        elif case == 6:
+            Wlevel = w*assemble(Tensor(1.0/mu_expr(levelmesh)*inner(tmpp, tmpq)*dx).inv).petscmat + (1-w)*assemble(Tensor(inner(tmpp, tmpq)*dx).inv).petscmat
+        else:
+            raise ValueError("Augmented Jacobian (case %d) not implemented yet" % case)
+
+        tmpu, tmpp = TrialFunctions(Zlevel)
+        tmpv, tmpq = TestFunctions(Zlevel)
+        tmpbcs = [DirichletBC(Zlevel.sub(0), Constant((0.,) * args.dim), "on_boundary")]
+        if args.dim == 3 and args.quad:
+            tmpbcs += [DirichletBC(Zlevel.sub(0), Constant((0., 0., 0.)), "top"), DirichletBC(Zlevel.sub(0), Constant((0., 0., 0.)), "bottom")]
+        BBClevel =  assemble(- tmpq * div(tmpu) * dx(degree=divdegree), bcs=tmpbcs, mat_type='nest').petscmat.getNestSubMatrix(1, 0)
+        Wlevel *= gamma
+        if level in BBCTW_dict:
+            BBCTWlevel = BBClevel.transposeMatMult(Wlevel, result=BBCTW_dict[level])
+        else:
+            BBCTWlevel = BBClevel.transposeMatMult(Wlevel)
+            BBCTW_dict[level] = BBCTWlevel
+        if level in BBCTWB_dict:
+            BBCTWBlevel = BBCTWlevel.matMult(BBClevel, result=BBCTWB_dict[level])
+        else:
+            BBCTWBlevel = BBCTWlevel.matMult(BBClevel)
+            BBCTWB_dict[level] = BBCTWBlevel
+
+
 
 # Solve Stoke's equation
 def aug_jacobian(X, J, ctx):
@@ -452,7 +470,7 @@ def modify_residual(X, F):
     else:
         return
 
-def get_transfers():
+def get_transfers(A_callback=None, BTWB_callback=None):
     V = Z.sub(0)
     Q = Z.sub(1)
     tdim = mesh.topological_dimension()
@@ -484,7 +502,31 @@ for i in range(args.itref+1):
                                      appctx=appctx, nullspace=nsp)
 
     if args.solver_type == "almg" and args.discretisation == "cg":
-        transfermanager = TransferManager(native_transfers=get_transfers())
+        if case == 3:
+            transfers = get_transfers()
+        else:
+            def BTWBcb(level):
+                return BBCTWB_dict[level]
+            def Acb(level):
+                ctx = solver._ctx
+                if level == nref:
+                    splitctx = ctx.split([(0,)])[0]
+                    A = splitctx._jac
+                    A.form = splitctx.J
+                    A.M = ctx._jac.M[0, 0]
+                    A.petscmat = ctx._jac.petscmat.getNestSubMatrix(0, 0)
+                    A.petscmat.setOption(A.petscmat.Option.SYMMETRIC, True)
+                    return A
+                else:
+                    ksp = solver.snes.ksp.pc.getFieldSplitSubKSP()[0]
+                    ctx = get_appctx(ksp.pc.getMGSmoother(level).dm) 
+                    A = ctx._jac
+                    A.form = ctx.J
+                    A.petscmat = A.petscmat
+                    A.petscmat.setOption(A.petscmat.Option.SYMMETRIC, True)
+                    return A
+            transfers = get_transfers(A_callback=Acb, BTWB_callback=BTWBcb)
+        transfermanager = TransferManager(native_transfers=transfers)
         solver.set_transfer_manager(transfermanager)
     # Write out solution
     solver.Z = Z #for calling performance_info
