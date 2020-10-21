@@ -515,7 +515,6 @@ for i in range(args.itref+1):
                     A.form = splitctx.J
                     A.M = ctx._jac.M[0, 0]
                     A.petscmat = ctx._jac.petscmat.getNestSubMatrix(0, 0)
-                    A.petscmat.setOption(A.petscmat.Option.SYMMETRIC, True)
                     return A
                 else:
                     ksp = solver.snes.ksp.pc.getFieldSplitSubKSP()[0]
@@ -523,7 +522,6 @@ for i in range(args.itref+1):
                     A = ctx._jac
                     A.form = ctx.J
                     A.petscmat = A.petscmat
-                    A.petscmat.setOption(A.petscmat.Option.SYMMETRIC, True)
                     return A
             transfers = get_transfers(A_callback=Acb, BTWB_callback=BTWBcb)
         transfermanager = TransferManager(native_transfers=transfers)
