@@ -130,7 +130,6 @@ elif case == 4:
     # Form BTWB
     M = assemble(a, bcs=bcs)
     A = M.M[0, 0].handle
-    print("A.block_sizes", A.block_sizes)
     B = M.M[1, 0].handle
     ptrial = TrialFunction(Q)
     ptest  = TestFunction(Q)
