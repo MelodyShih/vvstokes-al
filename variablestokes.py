@@ -287,40 +287,6 @@ class VariableViscosityStokesProblem():
         self.lvproblem = None
 
 class VariableViscosityStokesSolver():
-    def set_A_callback(self, callbackfun=None):
-        if callbackfun is None:
-            def A_callback(level, mat=None):
-                levelmesh = self.problem.mh[level]
-                mu = self.problem.mu_fun(levelmesh)
-                Vlevel,_ = self.problem.get_functionspace(levelmesh)
-                tmpu   = TrialFunction(Vlevel)
-                tmpv   = TestFunction(Vlevel)
-                tmpa   = self.problem.get_A_weak(tmpu, tmpv, mu)
-                tmpbcs = self.problem.get_dirichletbcs(levelmesh) 
-                M = assemble(tmpa, bcs=tmpbcs, tensor=mat)
-                return M
-            self.A_callback = A_callback
-        else:
-            self.A_callback = callbackfun
-
-    def get_A_callback(self):
-        if self.A_callback is None:
-            self.set_A_callback()
-        return self.A_callback
-
-    def set_BTWB_callback(self, callbackfun=None):
-        if callbackfun is None:
-            def BTWB_callback(level, mat=None):
-                return self.BTWB_dict[level]
-            self.BTWB_callback = BTWB_callback
-        else:
-            self.BTWB_callback = callbackfun
-
-    def get_BTWB_callback(self):
-        if self.BTWB_callback is None:
-            self.set_BTWB_callback()
-        return self.BTWB_callback
-
     def set_BTWB_dicts(self):
         BBCTWB_dict = {} # These are of type PETSc.Mat
         BBCTW_dict = {} # These are of type PETSc.Mat
@@ -605,8 +571,6 @@ class VariableViscosityStokesSolver():
         self.transfers = None
         self.BBCTWB_dict = None
         self.BBCTW_dict = None
-        self.BTWB_callback = None
-        self.A_callback = None
         self.lvsolver = None
 
         ## default setup
