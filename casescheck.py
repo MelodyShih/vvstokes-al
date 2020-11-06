@@ -106,9 +106,9 @@ def mu(mesh):
     return Function(Qm).interpolate(mu_expr(mesh))
 
 #======================================
-# Setup VariableStokesProblem
+# Setup VariableViscosityStokesProblem
 #======================================
-vvstokesprob = VariableStokesProblem(dim, # dimension of the problem 
+vvstokesprob = VariableViscosityStokesProblem(dim, # dimension of the problem 
                                     args.quad, #triangular/quadrilateral mesh
                                     args.discretisation, # finite elems spaces
                                     k, # order of discretisation
@@ -165,12 +165,12 @@ l = rhs(F)
 vvstokesprob_c3.set_linearvariationalproblem(a, l, sol_z_case3, bcs)
 
 #======================================
-# Setup VariableStokesSolver  
+# Setup VariableViscosityStokesSolver  
 #======================================
 #--------------------------------------
 # Case 4
 #--------------------------------------
-vvstokessolver = VariableStokesSolver(vvstokesprob, 
+vvstokessolver = VariableViscosityStokesSolver(vvstokesprob, 
                                       args.solver_type, 
                                       4,
                                       args.gamma,
@@ -181,12 +181,12 @@ vvstokessolver.set_linearvariationalsolver()
 #--------------------------------------
 # Case 3
 #--------------------------------------
-vvstokessolver_c3 = VariableStokesSolver(vvstokesprob_c3, 
-                                         args.solver_type, 
-                                         3,
-                                         args.gamma,
-                                         args.asmbackend,
-                                         setBTWBdics=False)
+vvstokessolver_c3 = VariableViscosityStokesSolver(vvstokesprob_c3, 
+                                                 args.solver_type, 
+                                                 3,
+                                                 args.gamma,
+                                                 args.asmbackend,
+                                                 setBTWBdics=False)
 
 # Setup standard prolongation for PkP0 for case 3 "cg" discretisation
 # (vvstokessolver_c3) 

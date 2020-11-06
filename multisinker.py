@@ -103,9 +103,9 @@ def mu(mesh):
     return Function(Qm).interpolate(mu_expr(mesh))
 
 #======================================
-# Setup VariableStokesProblem
+# Setup VariableViscosityStokesProblem
 #======================================
-vvstokesprob = VariableStokesProblem(dim, # dimension of the problem 
+vvstokesprob = VariableViscosityStokesProblem(dim, # dimension of the problem 
                                     args.quad, #triangular/quadrilateral mesh
                                     args.discretisation, # finite elems spaces
                                     k, # order of discretisation
@@ -154,9 +154,9 @@ sol_z = Function(Z)
 vvstokesprob.set_linearvariationalproblem(a, l, sol_z, bcs)
 
 #======================================
-# Setup VariableStokesSolver  
+# Setup VariableViscosityStokesSolver  
 #======================================
-vvstokessolver = VariableStokesSolver(vvstokesprob, 
+vvstokessolver = VariableViscosityStokesSolver(vvstokesprob, 
                                       args.solver_type, 
                                       args.case,
                                       args.gamma,

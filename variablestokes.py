@@ -1,6 +1,6 @@
 '''
 =======================================
-Implementation of class VariableStokesProblem, VariableStokesSolver
+Implementation of class VariableViscosityStokesProblem, VariableViscosityStokesSolver
 
 Author:                Florian Wechsung
                        Melody Shih
@@ -16,7 +16,7 @@ from balance import load_balance, rebalance
 
 import numpy as np
 
-class VariableStokesProblem():
+class VariableViscosityStokesProblem():
     def set_meshhierarchy(self, baseN, nref, rebalance=False):
         dim = self.dim
         quad = self.quad
@@ -156,7 +156,6 @@ class VariableStokesProblem():
         divdegree = self.quaddivdeg
         discretisation = self.discretisation
         V,Q = self.get_functionspace(mesh)
-        print(V)
         u = TrialFunction(V)
         v = TestFunction(V)
         if discretisation == "hdiv":
@@ -287,7 +286,7 @@ class VariableStokesProblem():
         self.mesh = None
         self.lvproblem = None
 
-class VariableStokesSolver():
+class VariableViscosityStokesSolver():
     def set_A_callback(self, callbackfun=None):
         if callbackfun is None:
             def A_callback(level, mat=None):
@@ -429,7 +428,7 @@ class VariableStokesSolver():
                 "ksp_type": "preonly",
                 "ksp_max_it": 1,
                 "pc_type": "lu",
-                "pc_factor_mat_solver_type": "superlu_dist",
+                #"pc_factor_mat_solver_type": "superlu_dist",
             }
 
             fieldsplit_0_hypre = {
