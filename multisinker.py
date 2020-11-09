@@ -17,6 +17,7 @@ from firedrake.mg.utils import get_level
 from balance import load_balance, rebalance
 
 from VariableViscosityStokes import *
+import copy 
 import argparse
 import numpy as np
 PETSc.Sys.popErrorHandler()
@@ -136,7 +137,9 @@ rhsweak += divrhs * q * dx(degree=divdegree)
 # Setup weak form of the variable viscosity Stokes eq
 #--------------------------------------
 # Dirichlet boundary condition
-bcs = vvstokesprob.get_dirichletbcs(mesh)
+bc_fun = vvstokesprob.create_dirichletbcsfun(mesh)
+vvstokesprob.set_bcsfun(bc_fun)
+bcs = vvstokesprob.get_bcs(mesh)
 # Weak form of Stokes
 F = vvstokesprob.get_weakform_stokes(mesh,bcs)
 F += rhsweak
@@ -150,6 +153,7 @@ l = rhs(F)
 
 # create solution vector
 sol_z = Function(Z)
+
 # set firedrake LinearVariationalProblem
 vvstokesprob.set_linearvariationalproblem(a, l, sol_z, bcs)
 
@@ -161,6 +165,11 @@ vvstokessolver = VariableViscosityStokesSolver(vvstokesprob,
                                       args.case,
                                       args.gamma,
                                       args.asmbackend)
+
+# monitor residual
+params = vvstokessolver.get_parameters()
+params["ksp_monitor_true_residual"]=None
+
 vvstokessolver.set_nsp()
 # set firedrake LinearVariationalSolver
 vvstokessolver.set_linearvariationalsolver()
@@ -178,4 +187,14 @@ for i in range(args.itref+1):
     vvstokessolver.solve()
     performance_info(COMM_WORLD, vvstokessolver)
 
+PETSc.Sys.Print("absolute diff in vel:",\
+       norm(sol_z.split()[0]-sol_z2.split()[0]))
+PETSc.Sys.Print("relative diff in vel:",\
+       norm(sol_z.split()[0]-sol_z2.split()[0])\
+       /norm(sol_z.split()[0]))
+PETSc.Sys.Print("absolute diff in pre: ",\
+       norm(sol_z.split()[1]-sol_z2.split()[1]))
+PETSc.Sys.Print("relative diff in pre: ",\
+       norm(sol_z.split()[1]-sol_z2.split()[1])\
+       /norm(sol_z.split()[1]))
 #File("u.pvd").write(z.split()[0])

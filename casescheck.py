@@ -38,7 +38,6 @@ parser.add_argument("--solver-type", type=str, default="almg")
 parser.add_argument("--gamma", type=float, default=1e4)
 parser.add_argument("--dr", type=float, default=1e8)
 parser.add_argument("--N", type=int, default=10)
-parser.add_argument("--case", type=int, default=3)
 parser.add_argument("--nsinker", type=int, default=8)
 parser.add_argument("--nonzero-rhs", dest="nonzero_rhs", default=False, 
                                                            action="store_true")
@@ -61,7 +60,6 @@ nref = args.nref
 dr = args.dr
 k = args.k
 N = args.N
-case = args.case
 w = args.w
 gamma = Constant(args.gamma)
 dim = args.dim
@@ -139,7 +137,9 @@ rhsweak += divrhs * q * dx(degree=divdegree)
 # Setup weak form of the variable viscosity Stokes eq
 #--------------------------------------
 # Dirichlet boundary condition
-bcs = vvstokesprob.get_dirichletbcs(mesh)
+bc_fun = vvstokesprob.create_dirichletbcsfun(mesh)
+vvstokesprob.set_bcsfun(bc_fun)
+bcs = vvstokesprob.get_bcs(mesh)
 # Weak form of Stokes
 F = vvstokesprob.get_weakform_stokes(mesh,bcs)
 F += rhsweak
@@ -175,6 +175,10 @@ vvstokessolver = VariableViscosityStokesSolver(vvstokesprob,
                                       4,
                                       args.gamma,
                                       args.asmbackend)
+# monitor residual
+params = vvstokessolver.get_parameters()
+params["ksp_monitor_true_residual"]=None
+
 vvstokessolver.set_nsp()
 vvstokessolver.set_linearvariationalsolver()
 
@@ -188,6 +192,10 @@ vvstokessolver_c3 = VariableViscosityStokesSolver(vvstokesprob_c3,
                                                  args.gamma,
                                                  args.asmbackend,
                                                  setBTWBdics=False)
+# monitor residual
+params = vvstokessolver.get_parameters()
+params["ksp_monitor_true_residual"]=None
+
 vvstokessolver_c3.set_nsp()
 # Setup standard prolongation for PkP0 for case 3 "cg" discretisation
 # (vvstokessolver_c3) 

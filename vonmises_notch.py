@@ -18,6 +18,7 @@ from VariableViscosityStokes import *
 import WeakForm
 import Abstract.Vector
 
+import copy
 import argparse
 import numpy as np
 PETSc.Sys.popErrorHandler()
@@ -34,6 +35,7 @@ parser.add_argument("--nref", type=int, default=1)
 parser.add_argument("--k", type=int, default=2)
 parser.add_argument("--solver-type", type=str, default="almg")
 parser.add_argument("--gamma", type=float, default=1e4)
+parser.add_argument("--itref", type=int, default=0)
 parser.add_argument("--case", type=int, default=3)
 parser.add_argument("--discretisation", type=str, default="hdiv")
 parser.add_argument("--quad-deg", type=int, dest="quad_deg", default=20)
@@ -58,7 +60,6 @@ VISC_TYPE = 'const' # const, anomaly
 VISC_REG  = 1.e-3
 VISC_MAX  = 1.e3
 VISC_REG  = 1e-3
-YIELD_STRENGTH = 0.5
 
 RHO = 2700.0
 GRAVITY = 9.81
@@ -72,9 +73,11 @@ REF_STRESS_RATE = 2.0*REF_STRAIN_RATE*REF_VISCOSITY
 
 VISC_UPPER_SCALED   = 1.e24/REF_VISCOSITY
 VISC_LOWER_SCALED   = 1.e21/REF_VISCOSITY
+BOUNDARY_INFLOW_VELOCITY = 1.0
 
 # nolinear solver parameters
 MONITOR_NL_ITER=True
+MONITOR_NL_STEPSEARCH=False
 NL_SOLVER_GRAD_RTOL = 1e-8
 NL_SOLVER_GRAD_STEP_RTOL = 1e-8
 NL_SOLVER_MAXITER = 100
@@ -92,7 +95,6 @@ vvstokesprob = VariableViscosityStokesProblem(2, # dimension of the problem
                                     k, # order of discretisation
                                     quaddegree=deg, #quadrature degree
                                     quaddivdegree=divdegree) # qaudrature divdeg                      
-
 basemesh = Mesh('mesh/compression_mesh_rounded_refine.msh')
 vvstokesprob.set_meshhierarchy(basemesh, nref)
 
@@ -109,21 +111,34 @@ V, Q = vvstokesprob.get_functionspace(mesh,info=True)
 VQ = V*Q
 
 # set functions for boundary conditions
-BOUNDARY_INFLOW_VELOCITY = 1.0
 vel_noslip = Constant((0.0, 0.0))
 vel_inflow = Constant((BOUNDARY_INFLOW_VELOCITY, 0.0))
 
-# construct boundary conditions
-bc_walls    = DirichletBC(VQ.sub(0).sub(1), 0.0, sub_domain=3)
-bc_left     = DirichletBC(VQ.sub(0), vel_inflow, sub_domain=1)
-bc_right    = DirichletBC(VQ.sub(0),-vel_inflow, sub_domain=2)
-bc_outflow  = DirichletBC(VQ.sub(1), 0.0       , sub_domain=4)
-bc = [bc_left, bc_right, bc_outflow, bc_walls]
+def bc_fun(mesh):
+    V, Q = vvstokesprob.get_functionspace(mesh)
+    VQ = V*Q
 
-# construct homogeneous Dirichlet BC's at inflow boundary for Newton steps
-bc_step_left  = DirichletBC(VQ.sub(0), vel_noslip, sub_domain=1)
-bc_step_right = DirichletBC(VQ.sub(0), vel_noslip, sub_domain=2)
-bc_step = [bc_step_left, bc_step_right, bc_outflow, bc_walls]
+    # construct boundary conditions
+    bc_walls    = DirichletBC(VQ.sub(0).sub(1), 0.0, sub_domain=3)
+    bc_left     = DirichletBC(VQ.sub(0), vel_inflow, sub_domain=1)
+    bc_right    = DirichletBC(VQ.sub(0),-vel_inflow, sub_domain=2)
+    #bc_outflow  = DirichletBC(VQ.sub(1), 0.0       , sub_domain=4)
+    bcs = [bc_left, bc_right, bc_walls]
+    return bcs
+
+def bcstep_fun(mesh):
+    V, Q = vvstokesprob.get_functionspace(mesh)
+    VQ = V*Q
+
+    # construct homogeneous Dirichlet BC's at inflow boundary for Newton steps
+    bc_walls    = DirichletBC(VQ.sub(0).sub(1), 0.0, sub_domain=3)
+    bc_step_left  = DirichletBC(VQ.sub(0), vel_noslip, sub_domain=1)
+    bc_step_right = DirichletBC(VQ.sub(0), vel_noslip, sub_domain=2)
+    bcs_step = [bc_step_left, bc_step_right, bc_walls]
+    return bcs_step
+
+vvstokesprob.set_bcsfun(bc_fun)
+bcs =  vvstokesprob.get_bcs(mesh)
 
 #--------------------------------------
 # Setup viscosity, right hand side
@@ -150,6 +165,9 @@ sol_prev_p = sol_prev.split()[1]
 step_u     = step.split()[0]
 step_p     = step.split()[1]
 
+sol2 = Function(VQ)
+step2 = Function(VQ)
+
 phi = 0
 C = 1.e8
 A = C
@@ -174,15 +192,29 @@ hess = WeakForm.hessian_NewtonStandard(sol_u, sol_p, VQ, visc_upper, VISC_REG,
 (a,l) = WeakForm.linear_stokes(rhs, VQ, visc_upper, dx, dx_upper,
                                visc_lower, dx_lower)
 
-#solve(a==l, sol, bc)
-vvstokesprob.set_linearvariationalproblem(a, l, sol, bc)
+vvstokesprob.set_linearvariationalproblem(a, l, sol, bcs)
 vvstokessolver = VariableViscosityStokesSolver(vvstokesprob, 
                                                args.solver_type, 
                                                args.case,
                                                args.gamma,
                                                args.asmbackend)
 vvstokessolver.set_linearvariationalsolver()
-vvstokessolver.solve()
+
+for i in range(args.itref+1):
+    vvstokessolver.solve()
+
+## uncomment to compare solutions between augmented/unaugmented sys
+#solve(a==l, sol2, bcs)
+#PETSc.Sys.Print("absolute diff in vel:",\
+#       norm(sol.split()[0]-sol2.split()[0]))
+#PETSc.Sys.Print("relative diff in vel:",\
+#       norm(sol.split()[0]-sol2.split()[0])\
+#       /norm(sol.split()[0]))
+#PETSc.Sys.Print("absolute diff in pre: ",\
+#       norm(sol.split()[1]-sol2.split()[1]))
+#PETSc.Sys.Print("relative diff in pre: ",\
+#       norm(sol.split()[1]-sol2.split()[1])\
+#       /norm(sol.split()[1]))
 
 # initialize gradient
 g = assemble(grad)
@@ -221,17 +253,32 @@ for itn in range(NL_SOLVER_MAXITER+1):
         break
 
     # assemble linearized system
-    #solve(hess == grad, step, bc_step)
-    vvstokesprob.set_linearvariationalproblem(hess, grad, step, bc_step)
+    vvstokesprob.set_bcsfun(bcstep_fun)
+    bcs_step = vvstokesprob.get_bcs(mesh)
+    vvstokesprob.set_linearvariationalproblem(hess, grad, step, bcs_step)
     vvstokessolver = VariableViscosityStokesSolver(vvstokesprob, 
                                                    args.solver_type, 
                                                    args.case,
                                                    args.gamma,
                                                    args.asmbackend)
-    vvstokessolver.set_linearvariationalsolver(augtopleftblock=False,
-                                               modifyresidual=False)
+    vvstokessolver.set_linearvariationalsolver()
     vvstokessolver.solve()
+    lin_it=vvstokessolver.get_iterationnum()
+    lin_it_total += lin_it
     
+    ## uncomment to compare solutions between augmented/unaugmented sys
+    #solve(hess == grad, step2, bcs_step)
+    #PETSc.Sys.Print("abstepute diff in vel:",\
+    #       norm(step.split()[0]-step2.split()[0]))
+    #PETSc.Sys.Print("relative diff in vel:",\
+    #       norm(step.split()[0]-step2.split()[0])\
+    #       /norm(step.split()[0]))
+    #PETSc.Sys.Print("abstepute diff in pre: ",\
+    #       norm(step.split()[1]-step2.split()[1]))
+    #PETSc.Sys.Print("relative diff in pre: ",\
+    #       norm(step.split()[1]-step2.split()[1])\
+    #       /norm(step.split()[1]))
+
     # compute the norm of the gradient
     g = assemble(grad)
     g_norm = norm(g)
@@ -249,7 +296,7 @@ for itn in range(NL_SOLVER_MAXITER+1):
     for j in range(NL_SOLVER_STEP_MAXITER):
         sol.vector().axpy(-step_length, step.vector())
         obj_val_next = assemble(obj)
-        if MONITOR_NL_ITER and 0 < j:
+        if MONITOR_NL_STEPSEARCH and 0 < j:
            print("Step search: {0:>2d}{1:>10f}{2:>20.12e}{3:>20.12e}".format(
                  j, step_length, obj_val_next, obj_val))
         if obj_val_next < obj_val + step_length*NL_SOLVER_STEP_ARMIJO*angle_grad_step:
@@ -287,6 +334,6 @@ if OUTPUT_VTK:
     solve(inner(edotp_t, (edotp - strainrateII))*dx == 0.0, edotp)
     Abstract.Vector.scale(edotp, REF_STRAIN_RATE)
 
-    File("strainrateII.pvd").write(edotp)
-    File("solution_u.pvd").write(sol_u)
-    File("solution_p.pvd").write(sol_p)
+    File("vtk/strainrateII.pvd").write(edotp)
+    File("vtk/solution_u.pvd").write(sol_u)
+    File("vtk/solution_p.pvd").write(sol_p)

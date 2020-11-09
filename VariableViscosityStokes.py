@@ -157,16 +157,24 @@ class VariableViscosityStokesProblem():
                                              % ( Q.dim(), Q.dim()/size))
         return V, Q
 
-    def get_dirichletbcs(self, mesh):
-        dim = self.dim 
-        quad = self.quad
-        V,Q = self.get_functionspace(mesh)
-        Z = V*Q
-        bcs = [DirichletBC(Z.sub(0), Constant((0.,) * dim), "on_boundary")]
-        if dim == 3 and quad:
-            bcs += [DirichletBC(Z.sub(0), Constant((0., 0., 0.)), "top"),
-                    DirichletBC(Z.sub(0), Constant((0., 0., 0.)), "bottom")]
-        return bcs
+    def create_dirichletbcsfun(self, mesh):
+        def dirichletbc_fun(mesh):
+            dim = self.dim 
+            quad = self.quad
+            V,Q = self.get_functionspace(mesh)
+            Z = V*Q
+            bcs = [DirichletBC(Z.sub(0), Constant((0.,) * dim), "on_boundary")]
+            if dim == 3 and quad:
+                bcs += [DirichletBC(Z.sub(0), Constant((0., 0., 0.)), "top"),
+                        DirichletBC(Z.sub(0), Constant((0., 0., 0.)), "bottom")]
+            return bcs
+        return dirichletbc_fun
+
+    def set_bcsfun(self, bc_fun):
+        self.bc_fun = bc_fun 
+
+    def get_bcs(self, mesh):
+        return self.bc_fun(mesh) 
 
     def get_weakform_augterm(self, mesh, gamma, divrhs):
         divdegree = self.quaddivdeg
@@ -276,7 +284,7 @@ class VariableViscosityStokesProblem():
         Z = V*Q
         u, p = TrialFunctions(Z)
         v, q = TestFunctions(Z)
-        bcs = self.get_dirichletbcs(mesh)
+        bcs = self.get_bcs(mesh)
         BBC = assemble(-q * div(u) * dx(degree=divdegree),\
                    bcs=bcs,mat_type='nest').petscmat.getNestSubMatrix(1, 0)
         return BBC
@@ -466,15 +474,15 @@ class VariableViscosityStokesSolver():
 
             params = {
                 "snes_type": "ksponly",
-                "snes_monitor": None,
+                #"snes_monitor": None,
                 "mat_type": "nest",
                 "ksp_type": "gmres",
                 "ksp_gmres_restart": 100,
                 "ksp_rtol": 1.0e-6,
                 "ksp_atol": 1.0e-10,
                 "ksp_max_it": 200,
-                "ksp_monitor_true_residual": None,
-                "ksp_converged_reason": None,
+                #"ksp_monitor_true_residual": None,
+                #"ksp_converged_reason": None,
                 "pc_type": "fieldsplit",
                 "pc_fieldsplit_type": "schur",
                 "pc_fieldsplit_schur_factorization_type": "full",
@@ -522,7 +530,8 @@ class VariableViscosityStokesSolver():
     def get_parameters(self):
         return self.params
 
-    def set_linearvariationalsolver(self,augtopleftblock=True,
+    def set_linearvariationalsolver(self,
+                                    augtopleftblock=True,
                                     modifyresidual=True):
         params = self.params
         nsp = self.nsp
@@ -558,7 +567,7 @@ class VariableViscosityStokesSolver():
             pre_is = Z._ises[1]
             Fvel = F.getSubVector(vel_is)
             Fpre = F.getSubVector(pre_is)
-            BTW =  self.BBCTW_dict[nref]
+            BTW  = self.BBCTW_dict[nref]
             Fvel += BTW*Fpre
             F.restoreSubVector(vel_is, Fvel)
             F.restoreSubVector(pre_is, Fpre)
@@ -572,6 +581,9 @@ class VariableViscosityStokesSolver():
         self.lvsolver = solver
         self.set_transfers()
         self.Z = Z
+
+    def get_iterationnum(self):
+        return self.lvsolver.snes.ksp.getIterationNumber()
 
     def solve(self):
         self.lvsolver.solve()

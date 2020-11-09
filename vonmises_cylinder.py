@@ -57,6 +57,7 @@ divdegree = None
 # Stokes problem parameters
 VISC_REG = 1e-3
 YIELD_STRENGTH = 0.5
+BOUNDARY_INFLOW_VELOCITY = 1.0
 
 MONITOR_NL_ITER=True
 NL_SOLVER_GRAD_RTOL = 1e-8
@@ -88,20 +89,33 @@ V, Q = vvstokesprob.get_functionspace(mesh,info=True)
 Z = V*Q
 
 # set functions for boundary conditions
-BOUNDARY_INFLOW_VELOCITY = 1.0
 vel_noslip = Constant((0.0, 0.0))
 vel_inflow = Constant((BOUNDARY_INFLOW_VELOCITY, 0.0))
 
 # construct boundary conditions
-bc_walls    = DirichletBC(Z.sub(0).sub(1), 0.0, sub_domain=3)
-bc_inflow   = DirichletBC(Z.sub(0), vel_inflow, sub_domain=1)
-bc_outflow  = DirichletBC(Z.sub(1), 0.0       , sub_domain=2)
-bc_cylinder = DirichletBC(Z.sub(0), vel_noslip, sub_domain=4)
-bc = [bc_inflow, bc_outflow, bc_walls, bc_cylinder]
+def bc_fun(mesh):
+    V, Q = vvstokesprob.get_functionspace(mesh)
+    Z = V*Q
+    bc_walls    = DirichletBC(Z.sub(0).sub(1), 0.0, sub_domain=3)
+    bc_inflow   = DirichletBC(Z.sub(0), vel_inflow, sub_domain=1)
+    bc_outflow  = DirichletBC(Z.sub(1), 0.0       , sub_domain=2)
+    bc_cylinder = DirichletBC(Z.sub(0), vel_noslip, sub_domain=4)
+    bc = [bc_inflow, bc_outflow, bc_walls, bc_cylinder]
+    return bc
 
 # construct homogeneous Dirichlet BC's at inflow boundary for Newton steps
-bc_step_inflow = DirichletBC(Z.sub(0), vel_noslip, sub_domain=1)
-bc_step = [bc_step_inflow, bc_outflow, bc_walls, bc_cylinder]
+def bcstep_fun(mesh):
+    V, Q = vvstokesprob.get_functionspace(mesh)
+    Z = V*Q
+    bc_walls    = DirichletBC(Z.sub(0).sub(1), 0.0, sub_domain=3)
+    bc_step_inflow = DirichletBC(Z.sub(0), vel_noslip, sub_domain=1)
+    bc_outflow  = DirichletBC(Z.sub(1), 0.0       , sub_domain=2)
+    bc_cylinder = DirichletBC(Z.sub(0), vel_noslip, sub_domain=4)
+    bc_step = [bc_step_inflow, bc_outflow, bc_walls, bc_cylinder]
+    return bc_step
+
+vvstokesprob.set_bcsfun(bc_fun)
+bcs =  vvstokesprob.get_bcs(mesh)
 
 #--------------------------------------
 # Setup viscosity, right hand side
@@ -185,6 +199,8 @@ for itn in range(NL_SOLVER_MAXITER+1):
 
     # assemble linearized system
     #solve(hess == grad, step, bc_step)
+    vvstokesprob.set_bcsfun(bcstep_fun)
+    bcs_step = vvstokesprob.get_bcs(mesh)
     vvstokesprob.set_linearvariationalproblem(hess, grad, step, bc_step)
     vvstokessolver = VariableViscosityStokesSolver(vvstokesprob, 
                                                    args.solver_type, 
@@ -250,6 +266,6 @@ if OUTPUT_VTK:
     solve(inner(edotp_t, (edotp - strainrateII))*dx == 0.0, edotp)
     Abstract.Vector.scale(edotp, REF_STRAIN_RATE)
 
-    File("strainrateII.pvd").write(edotp)
-    File("solution_u.pvd").write(sol_u)
-    File("solution_p.pvd").write(sol_p)
+    File("vtk/strainrateII.pvd").write(edotp)
+    File("vtk/solution_u.pvd").write(sol_u)
+    File("vtk/solution_p.pvd").write(sol_p)
