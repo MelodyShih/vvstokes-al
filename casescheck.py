@@ -114,9 +114,9 @@ vvstokesprob = VariableViscosityStokesProblem(dim, # dimension of the problem
                                     k, # order of discretisation
                                     quaddegree=deg, #quadrature degree
                                     quaddivdegree=divdegree) # qaudrature divdeg                      
-# setup mesh hierarchy, coarsest mesh has N elements each side and refine nref
-# times, i.e. the final mesh has N*pow(nref) elemenst each side
-vvstokesprob.set_meshhierarchy(N, nref)
+# set basemesh, mesh hierarchy  
+basemesh = vvstokesprob.create_basemesh("rectangle", N, N, N, 4, 4, 4)
+vvstokesprob.set_meshhierarchy(basemesh, nref)
 # set viscosity field
 vvstokesprob.set_viscosity(mu_expr, mu_max, mu_min)
 
@@ -175,6 +175,7 @@ vvstokessolver = VariableViscosityStokesSolver(vvstokesprob,
                                       4,
                                       args.gamma,
                                       args.asmbackend)
+vvstokessolver.set_nsp()
 vvstokessolver.set_linearvariationalsolver()
 
 
@@ -187,7 +188,7 @@ vvstokessolver_c3 = VariableViscosityStokesSolver(vvstokesprob_c3,
                                                  args.gamma,
                                                  args.asmbackend,
                                                  setBTWBdics=False)
-
+vvstokessolver_c3.set_nsp()
 # Setup standard prolongation for PkP0 for case 3 "cg" discretisation
 # (vvstokessolver_c3) 
 vvstokessolver_c3.set_linearvariationalsolver(augtopleftblock=False,
@@ -224,7 +225,7 @@ for i in range(args.itref+1):
     PETSc.Log.begin()
     vvstokessolver_c3.solve()
     performance_info(COMM_WORLD, vvstokessolver_c3)
-#File("u.pvd").write(z.split()[0])
+
 PETSc.Sys.Print("absolute diff in vel:",\
        norm(sol_z_case4.split()[0]-sol_z_case3.split()[0]))
 PETSc.Sys.Print("relative diff in vel:",\

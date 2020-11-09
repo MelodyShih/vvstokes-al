@@ -17,12 +17,50 @@ from balance import load_balance, rebalance
 import numpy as np
 
 class VariableViscosityStokesProblem():
-    def set_meshhierarchy(self, baseN, nref, rebalance=False):
-        dim = self.dim
-        quad = self.quad
-        
+    def create_basemesh(self,basemeshtype,Nx=-1, Ny=-1, Nz=-1, 
+                        Lx=-1, Ly=-1, Lz=-1, Cr=-1):
         distp = {"partition": True, 
                  "overlap_type": (DistributedMeshOverlapType.VERTEX, 1)}
+        dim = self.dim
+        quad = self.quad
+        if 'rectangle' == basemeshtype:
+            self.Nx = Nx
+            self.Ny = Ny
+            self.Nz = Nz
+            self.Lx = Lx
+            self.Ly = Ly
+            self.Lz = Lz
+            if dim == 2:
+                baseMesh = RectangleMesh(Nx, Ny, Lx, Ly, 
+                               distribution_parameters=distp,
+                               quadrilateral=quad)
+            elif dim == 3:
+                if self.quad:
+                    baseMesh = RectangleMesh(Nx, Ny, Lx, Ly, 
+                               distribution_parameters=distp, 
+                               quadrilateral=True)
+                else:
+                    baseMesh = BoxMesh(Nx, Ny, Nz, Lx, Ly, Lz, 
+                                       distribution_parameters=distp)
+            else:
+                raise NotImplementedError("Only implemented for dim=2,3")
+        elif 'rectanglewithhole' == basemeshtype:
+            if dim == 2:
+                baseMesh = RectangleMesh(Nx, Ny, Lx, Ly, 
+                                         distribution_parameters=distp,
+                                         quadrilateral=quad)
+            else:
+                raise NotImplementedError("Only implemented for dim=2")
+        else:
+            raise NotImplementedError('Unknown type of mesh "%s"'%basemeshtype)
+        return baseMesh
+
+    def set_meshhierarchy(self, basemesh, nref, rebalance=False):
+        dim = self.dim
+        quad = self.quad
+        distp = {"partition": True, 
+                 "overlap_type": (DistributedMeshOverlapType.VERTEX, 1)}
+        
         def before(dm, i):
             if i == 0 and rebalance:
                 rebalance(dm, i) # rebalance the initial coarse mesh
@@ -45,40 +83,18 @@ class VariableViscosityStokesProblem():
             for p in range(*dm.getDepthStratum(0)):
                 dm.setLabelValue("prolongation", p, i+2)
 
-        def mesh_hierarchy(hierarchy, baseN, nref, callbacks, 
-                           distribution_parameters):
-            if dim == 2:
-                baseMesh = RectangleMesh(baseN, baseN, 4, 4, 
-                               distribution_parameters=distribution_parameters,
-                               quadrilateral=quad)
-            elif dim == 3:
-                if self.quad:
-                    baseMesh = RectangleMesh(baseN, baseN, 4, 4, 
-                               distribution_parameters=distribution_parameters, 
-                               quadrilateral=True)
-                    basemh = MeshHierarchy(baseMesh, nref, callbacks=callbacks)
-                    mh = ExtrudedMeshHierarchy(basemh, height=4, 
-                                               base_layer=baseN)
-                    return mh
-                else:
-                    baseMesh = BoxMesh(baseN, baseN, baseN, 4, 4, 4, 
-                                       distribution_parameters=distp)
-            else:
-                raise NotImplementedError("Only implemented for dim=2,3")
-
-            if hierarchy == "uniform":
-                mh = MeshHierarchy(baseMesh, nref, reorder=True, 
-                               callbacks=callbacks,
-                               distribution_parameters=distribution_parameters)
-            else:
-                raise NotImplementedError("Only know uniform for the hierarchy.")
-            return mh
-
-        mh = mesh_hierarchy("uniform", baseN, nref, (before, after), distp)
+        if dim == 3:
+            if self.quad:
+                basemh = MeshHierarchy(basemesh, nref, callbacks=(before,after))
+                mh = ExtrudedMeshHierarchy(basemh, height=self.Lz, 
+                                           base_layer=self.Nz)
+        else:
+            mh = MeshHierarchy(basemesh, nref, reorder=True, 
+                               callbacks=(before,after),
+                               distribution_parameters=distp)
         for mesh in mh:
             load_balance(mesh)
         self.nref = nref
-        self.baseN = baseN
         self.mh = mh
         self.mesh = mh[-1]
 
@@ -452,7 +468,8 @@ class VariableViscosityStokesSolver():
                 "snes_type": "ksponly",
                 "snes_monitor": None,
                 "mat_type": "nest",
-                "ksp_type": "fgmres",
+                "ksp_type": "gmres",
+                "ksp_gmres_restart": 100,
                 "ksp_rtol": 1.0e-6,
                 "ksp_atol": 1.0e-10,
                 "ksp_max_it": 200,
@@ -496,7 +513,8 @@ class VariableViscosityStokesSolver():
                     "pc_factor_mat_solver_type": "superlu",
                 }
             else:
-                raise ValueError("please specify almg, allu or alamg for --solver-type")
+                raise ValueError("please specify almg, allu or alamg for \
+                                 --solver-type")
             self.params = params
         else:
             self.params = params
@@ -577,5 +595,4 @@ class VariableViscosityStokesSolver():
         if setBTWBdics is True:
             self.set_BTWB_dicts()
         self.set_parameters()
-        self.set_nsp()
 

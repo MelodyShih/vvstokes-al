@@ -111,9 +111,9 @@ vvstokesprob = VariableViscosityStokesProblem(dim, # dimension of the problem
                                     k, # order of discretisation
                                     quaddegree=deg, #quadrature degree
                                     quaddivdegree=divdegree) # qaudrature divdeg                      
-# setup mesh hierarchy, coarsest mesh has N elements each side and refine nref
-# times, i.e. the final mesh has N*pow(nref) elemenst each side
-vvstokesprob.set_meshhierarchy(N, nref)
+# set basemesh, mesh hierarchy  
+basemesh = vvstokesprob.create_basemesh("rectangle", N, N, N, 4, 4, 4)
+vvstokesprob.set_meshhierarchy(basemesh, nref)
 # set viscosity field
 vvstokesprob.set_viscosity(mu_expr, mu_max, mu_min)
 
@@ -161,6 +161,7 @@ vvstokessolver = VariableViscosityStokesSolver(vvstokesprob,
                                       args.case,
                                       args.gamma,
                                       args.asmbackend)
+vvstokessolver.set_nsp()
 # set firedrake LinearVariationalSolver
 vvstokessolver.set_linearvariationalsolver()
 
