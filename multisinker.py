@@ -15,8 +15,8 @@ from alfi import *
 from functools import reduce
 from firedrake.mg.utils import get_level
 from balance import load_balance, rebalance
-from variablestokes import *
 
+from VariableViscosityStokes import *
 import argparse
 import numpy as np
 PETSc.Sys.popErrorHandler()
