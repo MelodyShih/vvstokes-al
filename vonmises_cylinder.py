@@ -77,7 +77,7 @@ vvstokesprob = VariableViscosityStokesProblem(2, # dimension of the problem
                                     quaddegree=deg, #quadrature degree
                                     quaddivdegree=divdegree) # qaudrature divdeg                      
 
-basemesh = Mesh('cylinderrectangle.msh')
+basemesh = Mesh('mesh/cylinderrectangle.msh')
 vvstokesprob.set_meshhierarchy(basemesh, nref)
 
 #--------------------------------------

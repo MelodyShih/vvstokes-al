@@ -93,7 +93,7 @@ vvstokesprob = VariableViscosityStokesProblem(2, # dimension of the problem
                                     quaddegree=deg, #quadrature degree
                                     quaddivdegree=divdegree) # qaudrature divdeg                      
 
-basemesh = Mesh('compression_mesh_rounded_refine.msh')
+basemesh = Mesh('mesh/compression_mesh_rounded_refine.msh')
 vvstokesprob.set_meshhierarchy(basemesh, nref)
 
 mesh = vvstokesprob.get_mesh()
