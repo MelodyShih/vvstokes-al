@@ -217,7 +217,7 @@ for i in range(args.itref+1):
 #       /norm(sol.split()[1]))
 
 # initialize gradient
-g = assemble(grad)
+g = assemble(grad, bcs=bcstep_fun(mesh))
 g_norm_init = g_norm = norm(g)
 angle_grad_step_init = angle_grad_step = np.nan
 
@@ -280,7 +280,7 @@ for itn in range(NL_SOLVER_MAXITER+1):
     #       /norm(step.split()[1]))
 
     # compute the norm of the gradient
-    g = assemble(grad)
+    g = assemble(grad, bcs=bcs_step)
     g_norm = norm(g)
     # compute angle between step and (negative) gradient
     angle_grad_step = -step.vector().inner(g)

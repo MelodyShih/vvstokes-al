@@ -187,14 +187,4 @@ for i in range(args.itref+1):
     vvstokessolver.solve()
     performance_info(COMM_WORLD, vvstokessolver)
 
-PETSc.Sys.Print("absolute diff in vel:",\
-       norm(sol_z.split()[0]-sol_z2.split()[0]))
-PETSc.Sys.Print("relative diff in vel:",\
-       norm(sol_z.split()[0]-sol_z2.split()[0])\
-       /norm(sol_z.split()[0]))
-PETSc.Sys.Print("absolute diff in pre: ",\
-       norm(sol_z.split()[1]-sol_z2.split()[1]))
-PETSc.Sys.Print("relative diff in pre: ",\
-       norm(sol_z.split()[1]-sol_z2.split()[1])\
-       /norm(sol_z.split()[1]))
 #File("u.pvd").write(z.split()[0])

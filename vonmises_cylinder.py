@@ -58,6 +58,7 @@ divdegree = None
 VISC_REG = 1e-3
 YIELD_STRENGTH = 0.5
 BOUNDARY_INFLOW_VELOCITY = 1.0
+REF_STRAIN_RATE = 1.0
 
 MONITOR_NL_ITER=True
 NL_SOLVER_GRAD_RTOL = 1e-8
@@ -152,7 +153,7 @@ hess = WeakForm.hessian_NewtonStandard(sol_u, sol_p, Z, visc, VISC_REG,
 #TODO add stablization term for hdiv discretisation
 (a,l) = WeakForm.linear_stokes(rhs, Z, visc)
 
-vvstokesprob.set_linearvariationalproblem(a, l, sol, bc)
+vvstokesprob.set_linearvariationalproblem(a, l, sol, bcs)
 vvstokessolver = VariableViscosityStokesSolver(vvstokesprob, 
                                       args.solver_type, 
                                       args.case,
@@ -162,7 +163,7 @@ vvstokessolver.set_linearvariationalsolver()
 vvstokessolver.solve()
 
 # initialize gradient
-g = assemble(grad)
+g = assemble(grad, bcs=bcstep_fun(mesh))
 g_norm_init = g_norm = norm(g)
 angle_grad_step_init = angle_grad_step = np.nan
 
@@ -201,18 +202,18 @@ for itn in range(NL_SOLVER_MAXITER+1):
     #solve(hess == grad, step, bc_step)
     vvstokesprob.set_bcsfun(bcstep_fun)
     bcs_step = vvstokesprob.get_bcs(mesh)
-    vvstokesprob.set_linearvariationalproblem(hess, grad, step, bc_step)
+    vvstokesprob.set_linearvariationalproblem(hess, grad, step, bcs_step)
     vvstokessolver = VariableViscosityStokesSolver(vvstokesprob, 
                                                    args.solver_type, 
                                                    args.case,
                                                    args.gamma,
                                                    args.asmbackend)
-    vvstokessolver.set_linearvariationalsolver(augtopleftblock=False,
-                                               modifyresidual=False)
+    vvstokessolver.set_linearvariationalsolver(augtopleftblock=True,
+                                               modifyresidual=True)
     vvstokessolver.solve()
     
     # compute the norm of the gradient
-    g = assemble(grad)
+    g = assemble(grad, bcs=bcs_step)
     g_norm = norm(g)
     # compute angle between step and (negative) gradient
     angle_grad_step = -step.vector().inner(g)
