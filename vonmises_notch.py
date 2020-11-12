@@ -34,6 +34,7 @@ parser = argparse.ArgumentParser(add_help=False)
 parser.add_argument("--nref", type=int, default=1)
 parser.add_argument("--k", type=int, default=2)
 parser.add_argument("--solver-type", type=str, default="almg")
+parser.add_argument("--linearization", type=str, default="newton")
 parser.add_argument("--gamma", type=float, default=1e4)
 parser.add_argument("--itref", type=int, default=0)
 parser.add_argument("--case", type=int, default=3)
@@ -107,7 +108,7 @@ dx = Measure("dx", domain=mesh, subdomain_id="everywhere")
 # Setup boundary condition
 #--------------------------------------
 mesh = vvstokesprob.get_mesh()
-V, Q = vvstokesprob.get_functionspace(mesh,info=True)
+V, Q, Vd = vvstokesprob.get_functionspace(mesh,info=True, dualFncSp=True)
 VQ = V*Q
 
 # set functions for boundary conditions
@@ -165,8 +166,14 @@ sol_prev_p = sol_prev.split()[1]
 step_u     = step.split()[0]
 step_p     = step.split()[1]
 
-sol2 = Function(VQ)
-step2 = Function(VQ)
+# initialize dual variable
+S = None
+S_prev = None
+S_step = None
+S_proj = None
+
+#sol2 = Function(VQ)
+#step2 = Function(VQ)
 
 phi = 0
 C = 1.e8
@@ -180,9 +187,28 @@ grad = WeakForm.gradient(sol_u, sol_p, rhs, VQ, visc_upper, VISC_REG,
                          yield_strength, dx, dx_upper, visc_lower, dx_lower)
 
 # set weak form of Hessian and forms related to the linearization
-hess = WeakForm.hessian_NewtonStandard(sol_u, sol_p, VQ, visc_upper, VISC_REG, 
+if args.linearization == 'newton':
+    hess = WeakForm.hessian_NewtonStandard(sol_u, sol_p, VQ, visc_upper, VISC_REG, 
                                        yield_strength, dx, dx_upper, visc_lower, 
                                        dx_lower)
+elif args.linearization == 'stressvel':
+    if Vd is None:
+        raise ValueError("stressvel not implemented for discretisation %s" \
+                                   % vvstokesprob.discretisation)
+    S      = Function(Vd)
+    S_step = Function(Vd)
+    S_proj = Function(Vd)
+    S_prev = Function(Vd)
+    dualStep = WeakForm.hessian_dualStep(
+        sol_u, step_u, S, Vd, visc_upper, VISC_REG, yield_strength,
+        dx, dx_upper, visc_lower, dx_lower)
+    dualres = WeakForm.dualresidual(S, sol_u, Vd, visc_upper,
+        VISC_REG, yield_strength, dx, dx_upper, visc_lower, dx_lower)
+    hess = WeakForm.hessian_NewtonStressvel(
+        sol_u, sol_p, VQ, S_proj, visc_upper, VISC_REG,
+        yield_strength, dx, dx_upper, visc_lower, dx_lower)
+else:
+    raise ValueError("unknown type of linearization %s" % args.linearization)
 
 #======================================
 # Solve the nonlinear problem
@@ -232,6 +258,9 @@ if MONITOR_NL_ITER:
           "Itn", vvstokessolver.solver_type, "Energy", "||g||_l2", 
            "(grad,step)", "step len"))
 
+if args.linearization == 'stressvel':
+    # assemble mass matrices
+    Md = assemble(Abstract.WeakForm_Phi.mass(Vd))
 
 for itn in range(NL_SOLVER_MAXITER+1):
     # print iteration line
@@ -251,6 +280,18 @@ for itn in range(NL_SOLVER_MAXITER+1):
     if 0 < itn and not step_success:
         print("Stop reason: Step search reached maximum number of backtracking.")
         break
+
+    # set up the linearized system
+    if args.linearization == 'stressvel':
+        if 0 == itn:
+            Abstract.Vector.setZero(S)
+            Abstract.Vector.setZero(S_step)
+            Abstract.Vector.setZero(S_proj)
+        else:
+            # project S to unit sphere
+            Sprojweak = WeakForm.hessian_dualUpdate_boundMaxMagnitude(S, Vd, 1.0)
+            b = assemble(Sprojweak)
+            solve(Md, S_proj.vector(), b)
 
     # assemble linearized system
     vvstokesprob.set_bcsfun(bcstep_fun)
@@ -279,6 +320,13 @@ for itn in range(NL_SOLVER_MAXITER+1):
     #       norm(step.split()[1]-step2.split()[1])\
     #       /norm(step.split()[1]))
 
+    # solve dual variable step
+    if args.linearization == 'stressvel':
+        Abstract.Vector.scale(step, -1.0)
+        b = assemble(dualStep)
+        solve(Md, S_step.vector(), b)
+        Abstract.Vector.scale(step, -1.0)
+
     # compute the norm of the gradient
     g = assemble(grad, bcs=bcs_step)
     g_norm = norm(g)
@@ -300,6 +348,8 @@ for itn in range(NL_SOLVER_MAXITER+1):
            print("Step search: {0:>2d}{1:>10f}{2:>20.12e}{3:>20.12e}".format(
                  j, step_length, obj_val_next, obj_val))
         if obj_val_next < obj_val + step_length*NL_SOLVER_STEP_ARMIJO*angle_grad_step:
+            if args.linearization == 'stressvel':
+                S.vector().axpy(step_length, S_step.vector())
             obj_val = obj_val_next
             step_success = True
             break

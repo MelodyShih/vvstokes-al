@@ -104,27 +104,35 @@ class VariableViscosityStokesProblem():
     def get_meshhierarchy(self):
         return self.mh
         
-    def get_functionspace(self, mesh, info=False):
+    def get_functionspace(self, mesh, info=False, dualFncSp=False):
         k = self.k
         quad = self.quad
         dim = self.dim
         discretisation = self.discretisation
         if discretisation == "hdiv":
             if quad:
-                V = FunctionSpace(mesh, "RTCF", k)
-                Q = FunctionSpace(mesh, "DQ", k-1)
+                V  = FunctionSpace(mesh, "RTCF", k)
+                Q  = FunctionSpace(mesh, "DQ", k-1)
+                Vd_e = TensorElement('DQ', mesh.ufl_cell(), k-1)
+                Vd = FunctionSpace(mesh, Vd_e)
             else:
-                V = FunctionSpace(mesh, "BDM", k)
-                Q = FunctionSpace(mesh, "DG", k-1)
+                V  = FunctionSpace(mesh, "BDM", k)
+                Q  = FunctionSpace(mesh, "DG", k-1)
+                Vd_e = TensorElement('DG', mesh.ufl_cell(), k-1)
+                Vd = FunctionSpace(mesh, Vd_e)
         elif discretisation == "cg":
             if dim == 2:
                 if quad:
-                    V = VectorFunctionSpace(mesh, "CG", k)
-                    Q = FunctionSpace(mesh, "DPC", k-1)
+                    V  = VectorFunctionSpace(mesh, "CG", k)
+                    Vd_e = TensorElement('DQ', mesh.ufl_cell(), k-1)
+                    Vd = FunctionSpace(mesh, Vd_e)
+                    Q  = FunctionSpace(mesh, "DPC", k-1)
                     # Q = FunctionSpace(mesh, "DQ", k-2)
                 else:
-                    V = VectorFunctionSpace(mesh, "CG", k)
-                    Q = FunctionSpace(mesh, "DG", 0)
+                    V  = VectorFunctionSpace(mesh, "CG", k)
+                    Vd_e = TensorElement('DG', mesh.ufl_cell(), k-1)
+                    Vd = FunctionSpace(mesh, Vd_e)
+                    Q  = FunctionSpace(mesh, "DG", 0)
             elif dim == 3:
                 if quad:
                     horiz_elt = FiniteElement("CG", quadrilateral, k)
@@ -132,6 +140,7 @@ class VariableViscosityStokesProblem():
                     elt = VectorElement(TensorProductElement(horiz_elt, vert_elt))
                     V = FunctionSpace(mesh, elt)
                     Q = FunctionSpace(mesh, "DPC", k-1)
+                    Vd = None
                     # Q = FunctionSpace(mesh, "DQ", k-2)
                 else:
                     Pk = FiniteElement("Lagrange", mesh.ufl_cell(), k)
@@ -141,6 +150,8 @@ class VariableViscosityStokesProblem():
                     else:
                         eleu = VectorElement(Pk)
                     V = FunctionSpace(mesh, eleu)
+                    Vd_e = TensorElement('DG', mesh.ufl_cell(), k-1)
+                    Vd = FunctionSpace(mesh, Vd_e)
                     Q = FunctionSpace(mesh, "DG", 0)
             else:
                 raise NotImplementedError("Only implemented for dim=2,3")
@@ -155,7 +166,10 @@ class VariableViscosityStokesProblem():
                                              % ( V.dim(), V.dim()/size))
             PETSc.Sys.Print("dim(Q) = %i (%i per core) " \
                                              % ( Q.dim(), Q.dim()/size))
-        return V, Q
+        if dualFncSp is True:
+            return V, Q, Vd
+        else: 
+            return V, Q
 
     def create_dirichletbcsfun(self, mesh):
         def dirichletbc_fun(mesh):
@@ -480,7 +494,7 @@ class VariableViscosityStokesSolver():
                 "ksp_gmres_restart": 100,
                 "ksp_rtol": 1.0e-6,
                 "ksp_atol": 1.0e-10,
-                "ksp_max_it": 500,
+                "ksp_max_it": 1000,
                 #"ksp_view": None,
                 #"ksp_monitor_true_residual": None,
                 #"ksp_converged_reason": None,

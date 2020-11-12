@@ -321,3 +321,200 @@ def hessian_NewtonStandard(u, p, FncSp, visc1, viscosity_min, yield_strength,
     #    h = fd.CellDiameter(FncSp.mesh())
     #    hess = hess + _stabilization(p_trial, p_test, h, stab)
     return hess
+
+def hessian_NewtonStressvel(u, p, PrimalFncSp, S, visc1, viscosity_min, 
+                            yield_strength, dx=None, dx1=None, visc2=0.0, 
+                            dx2=None, stab=None):
+    '''
+    Creates the weak form for the Hessian of the stress-vel Newton linearization:
+
+    (1) Viscoplastic domain (dx1)
+        \int 2*viscmin*(grad_s utr,grad_s ute) + 
+             dPhi(eII(u))/(2*eII(u))*(I -Psi(eII(u))*sqrt(2)/dPhi(eII(u))*
+                 (grad_s u (x) S)/(grad_s u,grad_s u))*(grad_s utr,grad_s ute) - 
+             ptr*div(ute) - div(utr)*pte
+
+    (2) Isoviscous domain (dx2)
+        \int 2*visc2*(grad_s utr,grad_s ute) - ptr*div(ute) - div(utr)*pte
+
+    where
+
+        utr = u_trial = TrialFunction of the velocity space
+        ptr = p_trial = TrialFunction of the pressure space
+        ute = u_test = TestFunction of the velocity space
+        pte = p_test = TestFunction of the pressure space
+        S = viscous stress tensor (tau), also called dual variable
+        eII(u) = sqrt of the 2nd invariant of the strain rate (of u)
+        dPhi(eII(u)) = first derivative of Phi with respect to eII(u)
+        dsqPhi(eII(u)) = second derivative of Phi with respect to eII(u)
+        Psi(eII(u)) = (dPhi(eII(u)) - eII(u)*dsqPhi(eII(u)))/dPhi(eII(u))
+        viscmin = viscosity_min
+    '''
+    assert 0.0 <= viscosity_min
+    if dx is None:
+        dx = fd.dx
+        dx1 = dx
+
+    (u_trial,p_trial) = fd.TrialFunctions(PrimalFncSp)
+    (u_test,p_test)   = fd.TestFunctions(PrimalFncSp)
+    U         = fd.sym(fd.nabla_grad(u))
+    U_trial   = fd.sym(fd.nabla_grad(u_trial))
+    U_test    = fd.sym(fd.nabla_grad(u_test))
+
+    sigma     = fd.sqrt(fd.inner(0.5*U, U))
+    scale1 = math.sqrt(2)*yield_strength
+    visc1_stress = Abstract.WeakForm_Phi.hessian_NewtonStressvel(U=U,
+                      U_trial=U_trial, U_test=U_test, S=S,
+                      dPhi=dPhi(sigma, yield_strength, visc1),
+                      dsqPhi=dsqPhi(sigma, yield_strength, visc1),
+                      scale=scale1,
+                      reg=Reg(viscosity_min), dx=dx1)
+    if dx2 is not None:
+        scale2 = math.sqrt(2)*1e16
+        visc2_stress = Abstract.WeakForm_Phi.hessian_NewtonStressvel(U=U,
+            U_trial=U_trial, U_test=U_test, S=S,
+            dPhi=dPhi(sigma, 1e16, visc2),
+            dsqPhi=dsqPhi(sigma, 1e16, visc2),
+            scale=scale2,
+            reg=Reg(viscosity_min), dx=dx2)
+    else:
+        visc2_stress = 0.0
+
+    grad_press   = -p_trial*fd.div(u_test)*dx
+    div_vel      = -fd.div(u_trial)*p_test*dx
+    hess         = visc1_stress + visc2_stress + grad_press + div_vel
+    #if stab is not None:
+    #    h = fd.CellDiameter(PrimalFncSp.mesh())
+    #    hess = hess + _stabilization(p_trial, p_test, h, stab)
+    return hess
+
+def hessian_NewtonStressvelSym(u, p, PrimalFncSp, S, visc1, viscosity_min, 
+                               yield_strength, dx=None, dx1=None, visc2=0.0, 
+                               dx2=None, stab=None):
+    '''
+    Creates the weak form for the Hessian of the symmetrized stress-vel Newton 
+    linearization:
+
+    (1) Viscoplastic domain (dx1)
+        \int 2*viscmin*(grad_s utr,grad_s ute) + 
+             dPhi(eII(u))/(2*eII(u))*(I -Psi(eII(u))*sqrt(2)/dPhi(eII(u))*
+                 (grad_s u (x) S + S (x) grad_s u)/(grad_s u,grad_s u))*
+             (grad_s utr,grad_s ute) - ptr*div(ute) - div(utr)*pte
+
+    (2) Isoviscous domain (dx2)
+        \int 2*visc2*(grad_s utr,grad_s ute) - ptr*div(ute) - div(utr)*pte
+
+    where
+
+        utr = u_trial = TrialFunction of the velocity space
+        ptr = p_trial = TrialFunction of the pressure space
+        ute = u_test = TestFunction of the velocity space
+        pte = p_test = TestFunction of the pressure space
+        S = viscous stress tensor (tau), also called dual variable
+        eII(u) = sqrt of the 2nd invariant of the strain rate (of u)
+        dPhi(eII(u)) = first derivative of Phi with respect to eII(u)
+        dsqPhi(eII(u)) = second derivative of Phi with respect to eII(u)
+        Psi(eII(u)) = (dPhi(eII(u)) - eII(u)*dsqPhi(eII(u)))/dPhi(eII(u))
+        viscmin = viscosity_min
+    '''
+    assert 0.0 <= viscosity_min
+    if dx is None:
+        dx = fd.dx
+        dx1 = dx
+
+    (u_trial,p_trial) = fd.TrialFunctions(PrimalFncSp)
+    (u_test,p_test)   = fd.TestFunctions(PrimalFncSp)
+    U         = fd.sym(fd.nabla_grad(u))
+    U_trial   = fd.sym(fd.nabla_grad(u_trial))
+    U_test    = fd.sym(fd.nabla_grad(u_test))
+
+    sigma     = fd.sqrt(fd.inner(0.5*U, U))
+    scale1 = math.sqrt(2)*yield_strength
+    visc1_stress = Abstract.WeakForm_Phi.hessian_NewtonStressvelSym(U=U,
+        U_trial=U_trial, U_test=U_test, S=S,
+        dPhi=dPhi(sigma, yield_strength, visc1),
+        dsqPhi=dsqPhi(sigma, yield_strength, visc1),
+        scale=scale1,
+        reg=Reg(viscosity_min), dx=dx1)
+    grad_press = - p_trial*fd.div(u_test)*fd.dx
+    
+    grad_press   = -p_trial*fd.div(u_test)*dx
+    div_vel      = -fd.div(u_trial)*p_test*dx
+    if dx2 is not None:
+        scale2 = math.sqrt(2)*1e16
+        visc2_stress = Abstract.WeakForm_Phi.hessian_NewtonStressvelSym(U=U,
+            U_trial=U_trial, U_test=U_test, S=S,
+            dPhi=dPhi(sigma, 1e16, visc2),
+            dsqPhi=dsqPhi(sigma, 1e16, visc2),
+            scale=scale2,
+            reg=Reg(viscosity_min), dx=dx2)
+    else:
+        visc2_stress = 0.0
+
+    hess         = visc1_stress + visc2_stress + grad_press + div_vel
+    #if stab is not None:
+    #    h = fd.CellDiameter(PrimalFncSp.mesh())
+    #    hess = hess + _stabilization(p_trial, p_test, h, stab)
+    return hess
+
+def hessian_dualStep(u, u_step, S, DualFncSp, visc1, viscosity_min, 
+                     yield_strength, dx=None, dx1=None, visc2=0.0, dx2=None):
+    '''
+    Creates the weak form for step of dual variable (viscous stress tensor, tau)
+    '''
+    if dx is None:
+        dx = fd.dx
+        dx1 = dx
+
+    U         = fd.sym(fd.nabla_grad(u))
+    U_step    = fd.sym(fd.nabla_grad(u_step))
+    sigma     = fd.sqrt(fd.inner(0.5*U, U))
+
+    scale1 = math.sqrt(2)*yield_strength
+    S_step = Abstract.WeakForm_Phi.dualstepNewtonStressvel(S=S, 
+                  S_test=fd.TestFunction(DualFncSp),U=U, U_step=U_step, 
+                  dPhi=dPhi(sigma, yield_strength, visc1),
+                  dsqPhi=dsqPhi(sigma, yield_strength, visc1),
+                  scale=scale1, dx=dx1)
+    if dx2 is not None:
+        scale2 = math.sqrt(2)*1e16
+        S_step = S_step + Abstract.WeakForm_Phi.dualstepNewtonStressvel(S=S, 
+                          S_test=fd.TestFunction(DualFncSp),U=U, U_step=U_step, 
+                          dPhi=dPhi(sigma, 1e16, visc2),
+                          dsqPhi=dsqPhi(sigma, 1e16, visc2),
+                          scale=scale2, dx=dx2)
+    return S_step
+
+def dualresidual(S, u, DualFncSp, visc1, viscosity_min, yield_strength, dx=None, 
+                 dx1=None, visc2=0.0, dx2=None):
+    '''
+    Creates the weak form for residual of dual variable (viscous stress tensor, 
+    tau)
+    '''
+
+    if dx is None:
+        dx = fd.dx
+        dx1 = dx
+
+    U = fd.sym(fd.nabla_grad(u))
+
+    scale1 = math.sqrt(2)*yield_strength
+    sigma     = fd.sqrt(fd.inner(0.5*U, U))
+    res = Abstract.WeakForm_Phi.dualResidual(S=S, 
+                S_test=fd.TestFunction(DualFncSp),U=U, 
+                dPhi=dPhi(sigma, yield_strength, visc1),
+                scale=scale1, dx=dx1)
+    if dx2 is not None:
+        scale2 = math.sqrt(2)*1e16
+        res = res + Abstract.WeakForm_Phi.dualResidual(S=S, 
+                        S_test=fd.TestFunction(DualFncSp),U=U, 
+                        dPhi=dPhi(sigma, 1e16, visc2),
+                        scale=scale2, dx=dx2)
+    return res
+
+def hessian_dualUpdate_boundMaxMagnitude(S, DualFncSp, max_magn):
+    S_test = fd.TestFunction(DualFncSp)
+    S_rescaled = fd.conditional( fd.lt(fd.inner(S, S), max_magn*max_magn),
+                    fd.inner(S, S_test),
+                    fd.inner(S, S_test)/fd.sqrt(fd.inner(S,S))*max_magn)*fd.dx
+    return S_rescaled
