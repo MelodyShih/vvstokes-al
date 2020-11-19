@@ -1,8 +1,7 @@
 '''
 =======================================
-Compare results between standard prolongation (only implmented for Qh=P0^disc)
-and algebraic schöberl prolongation using multisinker problem with 
-discretisation Pk-P0^disc 
+Runs linear variable viscosity Stokes solver for a Problem with multiple 
+sinkers.
 
 Author:                Florian Wechsung
                        Melody Shih
@@ -21,7 +20,6 @@ from VariableViscosityStokes import *
 import copy 
 import argparse
 import numpy as np
-from petsc4py import PETSc
 PETSc.Sys.popErrorHandler()
 
 import logging
@@ -38,6 +36,7 @@ parser.add_argument("--solver-type", type=str, default="almg")
 parser.add_argument("--gamma", type=float, default=1e4)
 parser.add_argument("--dr", type=float, default=1e8)
 parser.add_argument("--N", type=int, default=10)
+parser.add_argument("--case", type=int, default=3)
 parser.add_argument("--nsinker", type=int, default=8)
 parser.add_argument("--nonzero-rhs", dest="nonzero_rhs", default=False, 
                                                            action="store_true")
@@ -60,6 +59,7 @@ nref = args.nref
 dr = args.dr
 k = args.k
 N = args.N
+case = args.case
 w = args.w
 gamma = Constant(args.gamma)
 dim = args.dim
@@ -124,14 +124,8 @@ vvstokesprob.set_viscosity(mu_expr)
 # rhs
 mesh = vvstokesprob.get_mesh()
 V, Q = vvstokesprob.get_functionspace(mesh,info=True)
-Z = V*Q
-v, q = TestFunctions(Z)
+v = TestFunction(V)
 rhsweak = -10 * (chi_n(mesh)-1)*v[1] * dx(degree=deg)
-if args.nonzero_rhs:
-    divrhs = SpatialCoordinate(mesh)[0]-2
-else:
-    divrhs = Constant(0)
-rhsweak += divrhs * q * dx(degree=divdegree)
 
 #--------------------------------------
 # Setup weak form of the variable viscosity Stokes eq
@@ -139,10 +133,19 @@ rhsweak += divrhs * q * dx(degree=divdegree)
 # Dirichlet boundary condition
 bc_fun = vvstokesprob.create_dirichletbcsfun(mesh)
 vvstokesprob.set_bcsfun(bc_fun)
-bcs = vvstokesprob.get_bcs(mesh)
+
+dim  = vvstokesprob.dim 
+quad = vvstokesprob.quad
+V,Q  = vvstokesprob.get_functionspace(mesh)
+bcs  = [DirichletBC(V, Constant((0.,) * dim), "on_boundary")]
+if dim == 3 and quad:
+    bcs += [DirichletBC(V, Constant((0., 0., 0.)), "top"),
+            DirichletBC(V, Constant((0., 0., 0.)), "bottom")]
+
 # Weak form of Stokes
-F = vvstokesprob.get_weakform_stokes(mesh,bcs)
+F = vvstokesprob.get_weakform_A(mesh,bcs)
 F += rhsweak
+
 
 #--------------------------------------
 # Setup firedrake's Linear variational problem (stores in vvstokesprob) 
@@ -151,97 +154,154 @@ a = lhs(F)
 l = rhs(F)
 
 # create solution vector
-sol_z_case4 = Function(Z)
-vvstokesprob.set_linearvariationalproblem(a, l, sol_z_case4, bcs)
+sol_u = Function(V)
 
-# case 3:
-# Add weak form of augmented term gamma*(div(u),div(v))*dx
-sol_z_case3 = Function(Z)
-vvstokesprob_c3 = copy.copy(vvstokesprob)
-aug = vvstokesprob_c3.get_weakform_augterm(mesh, args.gamma, divrhs)
-Fgamma = F + aug
-a = lhs(F)
-l = rhs(F)
-vvstokesprob_c3.set_linearvariationalproblem(a, l, sol_z_case3, bcs)
+# set firedrake LinearVariationalProblem
+vvstokesprob.set_linearvariationalproblem(a, l, sol_u, bcs)
 
 #======================================
 # Setup VariableViscosityStokesSolver  
 #======================================
-#--------------------------------------
-# Case 4
-#--------------------------------------
 vvstokessolver = VariableViscosityStokesSolver(vvstokesprob, 
                                       args.solver_type, 
-                                      4,
+                                      args.case,
                                       args.gamma,
                                       args.asmbackend)
-# monitor residual
-params = vvstokessolver.get_parameters()
-params["ksp_monitor_true_residual"]=None
 
-vvstokessolver.set_nsp()
-vvstokessolver.set_transfers()
-vvstokessolver.set_linearvariationalsolver()
+common = {
+    "snes_type": "ksponly",
+    "ksp_type": "fgmres",
+    "ksp_gmres_restart": 200,
+    "ksp_norm_type": "unpreconditioned",
+    "ksp_rtol": 1.0e-6,
+    "ksp_atol": 1.0e-10,
+    "ksp_max_it": 200,
+    "ksp_converged_reason": None,
+    "ksp_monitor_true_residual": None,
+}
 
+solver_lu = {
+    "pc_type": "lu",
+    "pc_factor_mat_solver_type": "superlu_dist",
+}
 
-#--------------------------------------
-# Case 3
-#--------------------------------------
-vvstokessolver_c3 = VariableViscosityStokesSolver(vvstokesprob_c3, 
-                                                 args.solver_type, 
-                                                 3,
-                                                 args.gamma,
-                                                 args.asmbackend,
-                                                 setBTWBdics=False)
-# monitor residual
-params = vvstokessolver.get_parameters()
-params["ksp_monitor_true_residual"]=None
+solver_hypre = {
+    "pc_type": "hypre",
+}
 
-vvstokessolver_c3.set_nsp()
-# Setup standard prolongation for PkP0 for case 3 "cg" discretisation
-# (vvstokessolver_c3) 
-vvstokessolver_c3.set_linearvariationalsolver(augtopleftblock=False,
-                                              modifyresidual=False)
-if vvstokesprob_c3.discretisation == "cg" and vvstokesprob_c3.discretisation == "almg":
-    V = Z.sub(0)
-    Q = Z.sub(1)
-    tdim = mesh.topological_dimension()
-    vtransfer = PkP0SchoeberlTransfer((mu_transfer, gamma), tdim, 
-                hierarchy, backend=args.asmbackend, b_matfree=True, 
-                hexmesh=(args.dim == 3 and args.quad))
+mg_levels_solver_cheb = {
+    "ksp_type": "fgmres",
+    "ksp_max_it": 5,
+    "pc_type": "bjacobi",
+}
+
+mg_levels_solver = {
+    "ksp_type": "fgmres",
+    "ksp_norm_type": "unpreconditioned",
+    "ksp_max_it": 5,
+    "pc_type": "python",
+    "pc_python_type": "hexstar.ASMHexStarPC" if (dim==3 and quad==True) 
+                                            else "firedrake.ASMStarPC",
+    "pc_star_construct_dim": 0,
+    "pc_star_backend": args.asmbackend,
+    # "pc_star_sub_pc_asm_sub_mat_type": "seqaij",
+    # "pc_star_sub_sub_pc_factor_mat_solver_type": "umfpack",
+    "pc_star_sub_sub_pc_factor_in_place": None,
+    "pc_hexstar_construct_dim": 0,
+    "pc_hexstar_backend": args.asmbackend,
+    "pc_hexstar_sub_sub_pc_factor_in_place": None,
+    # "pc_hexstar_sub_pc_asm_sub_mat_type": "seqaij",
+    # "pc_hexstar_sub_sub_pc_factor_mat_solver_type": "umfpack",
+}
+
+solver_mg = {
+    "pc_type": "mg",
+    "pc_mg_type": "full",
+    #"mg_levels": mg_levels_solver,
+    "mg_coarse_pc_type": "python",
+    "mg_coarse_pc_python_type": "firedrake.AssembledPC",
+    "mg_coarse_assembled_pc_type": "lu",
+    "mg_coarse_assembled_pc_factor_mat_solver_type": "superlu_dist",
+}
+
+if args.solver_type == "almg":
+    params = {**common, **solver_mg}
+    params["mg_levels"] = mg_levels_solver
+elif args.solver_type == "almgcheb":
+    params = {**common, **solver_mg}
+    params["mg_levels"] = mg_levels_solver_cheb
+elif args.solver_type == "allu":
+    params = {**common, **solver_lu}
+elif args.solver_type == "alamg":
+    params = {**common, **solver_hypre}
+else:
+    raise ValueError("please specify almg, allu or alamg for --solver-type")
+
+vvstokessolver.set_parameters(params)
+
+def augtopleftblock_cb(X, J, ctx):
+    mh, level = get_level(ctx._x.ufl_domain())
+    BTWBlevel = vvstokessolver.BBCTWB_dict[level]
+    if level == nref:
+        rmap, cmap = J.getLGMap()
+        J.axpy(1, BTWBlevel, J.Structure.SUBSET_NONZERO_PATTERN)
+        J.setLGMap(rmap, cmap)
+    else:
+        rmap, cmap = J.getLGMap()
+        J.axpy(1, BTWBlevel, J.Structure.SUBSET_NONZERO_PATTERN)
+        J.setLGMap(rmap, cmap)
+
+def modifyresidual_cb(X, F):
+    if case == 4 or case == 5:
+        F += BTWB*X
+    else:
+        return
+
+# set firedrake LinearVariationalSolver
+vvstokessolver.set_linearvariationalsolver(augtopleftblock=True,
+                                         modifyresidual=False,
+                                         augtopleftblock_cb=augtopleftblock_cb,
+                                         modifyresidual_cb=modifyresidual_cb)
+#solver = LinearVariationalSolver(vvstokesprob.lvproblem,
+#                                 solver_parameters=params,
+#                                 options_prefix="topleft_")
+if vvstokessolver.solver_type == "almg" and vvstokesprob.discretisation == "cg":
+    lvsolver = vvstokessolver.lvsolver
+    dim  = vvstokesprob.dim
+    quad = vvstokesprob.quad
+    nref = vvstokesprob.nref
+    gamma = vvstokessolver.gamma
+    asmbackend = vvstokessolver.asmbackend
+    def BTWBcb(level):
+        return vvstokessolver.BBCTWB_dict[level]
+    def Acb(level):
+        ksp = lvsolver.snes.ksp
+        ctx = get_appctx(ksp.pc.getMGSmoother(level).dm)
+        A = ctx._jac
+        A.form = ctx.J
+        A.petscmat = A.petscmat
+        return A
+    V, Q = vvstokesprob.get_functionspace(mesh)
+    tdim = vvstokesprob.mesh.topological_dimension()
+    mu_transfer = mu_expr 
+    vtransfer = AlgebraicSchoeberlTransfer((mu_transfer, gamma), 
+                         Acb, BTWBcb, tdim, 'uniform',
+                         backend=asmbackend,
+                         hexmesh=(dim==3 and quad))
     qtransfer = NullTransfer()
-    transfers = {V.ufl_element(): 
-                        (vtransfer.prolong,vtransfer.restrict,inject),
-                 Q.ufl_element(): (prolong,restrict,qtransfer.inject)}
-    vvstokessolver_c3.set_transfers(transfers=transfers)
+    transfers = {V.ufl_element(): (vtransfer.prolong, 
+                                   vtransfer.restrict, 
+                                   inject),
+                 Q.ufl_element(): (prolong, restrict, qtransfer.inject)}
+    #vvstokessolver.set_transfers(transfers=transfers)
 
 #======================================
 # Solve the multisinker problem
 #======================================
-# Set initial value
-if args.nonzero_initial_guess:
-    sol_z_case4.split()[0].project(Constant((1., 1.)))
-    sol_z_case4.split()[0].project(Constant((1., 1.)))
-    sol_z_case3.split()[1].interpolate(SpatialCoordinate(mesh)[1]-2)
-    sol_z_case3.split()[1].interpolate(SpatialCoordinate(mesh)[1]-2)
-
 for i in range(args.itref+1):
     PETSc.Log.begin()
     vvstokessolver.solve()
+    #solver.solve()
     performance_info(COMM_WORLD, vvstokessolver)
 
-for i in range(args.itref+1):
-    PETSc.Log.begin()
-    vvstokessolver_c3.solve()
-    performance_info(COMM_WORLD, vvstokessolver_c3)
-
-PETSc.Sys.Print("absolute diff in vel:",\
-       norm(sol_z_case4.split()[0]-sol_z_case3.split()[0]))
-PETSc.Sys.Print("relative diff in vel:",\
-       norm(sol_z_case4.split()[0]-sol_z_case3.split()[0])\
-       /norm(sol_z_case3.split()[0]))
-PETSc.Sys.Print("absolute diff in pre: ",\
-       norm(sol_z_case4.split()[1]-sol_z_case3.split()[1]))
-PETSc.Sys.Print("relative diff in pre: ",\
-       norm(sol_z_case4.split()[1]-sol_z_case3.split()[1])\
-       /norm(sol_z_case3.split()[1]))
+#File("u.pvd").write(z.split()[0])

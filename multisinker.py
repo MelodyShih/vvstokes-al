@@ -116,7 +116,7 @@ vvstokesprob = VariableViscosityStokesProblem(dim, # dimension of the problem
 basemesh = vvstokesprob.create_basemesh("rectangle", N, N, N, 4, 4, 4)
 vvstokesprob.set_meshhierarchy(basemesh, nref)
 # set viscosity field
-vvstokesprob.set_viscosity(mu_expr, mu_max, mu_min)
+vvstokesprob.set_viscosity(mu_expr)
 
 #--------------------------------------
 # Setup right hand side
@@ -169,10 +169,13 @@ vvstokessolver = VariableViscosityStokesSolver(vvstokesprob,
 # monitor residual
 params = vvstokessolver.get_parameters()
 params["ksp_monitor_true_residual"]=None
+params["ksp_converged_reason"]=None
 
 vvstokessolver.set_nsp()
 # set firedrake LinearVariationalSolver
 vvstokessolver.set_linearvariationalsolver()
+if args.solver_type == "almg":
+    vvstokessolver.set_transfers()
 
 #======================================
 # Solve the multisinker problem

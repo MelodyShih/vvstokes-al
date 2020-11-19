@@ -140,6 +140,13 @@ def hessian_NewtonStressvelSym(U, U_trial, U_test, S, dPhi, dsqPhi,
         return (hess)*dx
     return (hess)*fd.dx
 
+def precondvisc(U, dPhi, reg=None):
+    sigma = fd.sqrt(fd.inner(0.5*U, U))
+    visc = dPhi/(2*sigma)
+    if reg is not None:
+        visc = visc + reg
+    return visc
+
 def dualstepNewtonStressvel(S, S_test, U, U_step, dPhi, dsqPhi, 
     scale=1.0, dx=None):
     '''

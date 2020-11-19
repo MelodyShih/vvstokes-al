@@ -128,7 +128,7 @@ rhs = Constant((0.0, 0.0))
 visc = Constant(1.0)
 def visc_fun(mesh):
     return Constant(1.0)
-vvstokesprob.set_viscosity(visc_fun, 1.0, 1.0)
+vvstokesprob.set_viscosity(visc_fun)
 
 #--------------------------------------
 # Setup weak form
@@ -160,6 +160,7 @@ vvstokessolver = VariableViscosityStokesSolver(vvstokesprob,
                                       args.gamma,
                                       args.asmbackend)
 vvstokessolver.set_linearvariationalsolver()
+vvstokessolver.set_transfers()
 vvstokessolver.solve()
 
 # initialize gradient

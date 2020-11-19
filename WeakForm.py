@@ -15,7 +15,7 @@ import sys
 
 import Abstract.WeakForm_Phi
 
-PHICASE = 'Comp'
+PHICASE = 'Ideal'
 #=======================================
 # Basic Weak Forms
 #=======================================
@@ -48,13 +48,34 @@ def strainrateII(u, FncSpScalar=None):
     else:
         return srII * fd.TestFunction(FncSpScalar) * fd.dx
 
+def visceff(u, visc1, visc_min, yield_strength, FncSpScalar=None):
+    '''
+    Creates the weak form for the second invariant of the viscous stress tensor.
+    '''
+    srII = fd.sqrt(0.5*fd.inner( fd.sym(fd.nabla_grad(u)), fd.sym(fd.nabla_grad(u)) ))
+    if PHICASE == 'Ideal':
+        visc_eff = visc_min + fd.conditional(
+                          fd.lt(2.0*visc1*srII, yield_strength),
+                          visc1, 0.5*yield_strength/srII)
+    elif PHICASE == 'Comp':
+        visc_eff = yield_strength*visc1/(2*srII*visc1+yield_strength)
+    else: 
+        raise ValueError("Unknown type of Phi")
+    if FncSpScalar is None:
+        return visc_eff
+    else:
+        return visc_eff* fd.TestFunction(FncSpScalar) * fd.dx
+
 def viscstressII(u, FncSpScalar, viscosity):
     '''
     Creates the weak form for the second invariant of the viscous stress tensor.
     '''
-    return 2.0 * viscosity * strainrateII(u, FncSpScalar)
+    if FncSpScalar is None:
+        return srII
+    else:
+        return srII * fd.TestFunction(FncSpScalar) * fd.dx
 
-def linear_stokes(rhs_mom, FncSp, visc1, dx=None, dx1=None, visc2=0.0, dx2=None):
+def linear_stokes(rhs_mom, FncSp, visc1, dx=None, dx1=None, visc2=0.0, dx2=None, visc3=0.0, dx3=None):
     '''
     Creates the weak form for linear stokes equation
     '''
@@ -73,9 +94,14 @@ def linear_stokes(rhs_mom, FncSp, visc1, dx=None, dx1=None, visc2=0.0, dx2=None)
     else:
       visc2_stress = 0.0
 
+    if dx3 is not None:
+      visc3_stress = 2.0*visc3*fd.inner(U_trial, U_test)*dx3
+    else:
+      visc3_stress = 0.0
+
     grad_press  = -p_trial*fd.div(u_test)*dx
     div_vel     = -fd.div(u_trial)*p_test*dx
-    stokes      = visc1_stress + visc2_stress + grad_press + div_vel
+    stokes      = visc1_stress + visc2_stress + grad_press + div_vel + visc3_stress
     rhs_vel     = fd.inner(rhs_mom, u_test)*dx
 
     return (stokes, rhs_vel)
@@ -174,7 +200,8 @@ def Reg(viscosity_min):
 # Objective 
 #=======================================
 def objective(u, p, rhs_mom, visc1, viscosity_min, 
-              yield_strength, dx=None, dx1=None, visc2=0.0, dx2=None):
+              yield_strength, dx=None, dx1=None, visc2=0.0, dx2=None,
+              visc3=0.0, dx3=None):
     '''
     Creates the weak form for the objective functional:
 
@@ -202,15 +229,23 @@ def objective(u, p, rhs_mom, visc1, viscosity_min,
                reg=Reg(viscosity_min), dx=dx2)
     else:
         obj2 = 0.0
+
+    if dx3 is not None:
+        obj3 = Abstract.WeakForm_Phi.objective(U=U,
+               Phi=Phi(sigma, 1e16, visc3), 
+               reg=Reg(viscosity_min), dx=dx3)
+    else:
+        obj3 = 0.0
         
-    return obj1 + obj2 - fd.inner(rhs_mom, u)*dx
+    return obj1 + obj2 + obj3 - fd.inner(rhs_mom, u)*dx
         
 #=======================================
 # Linearization
 #=======================================
 
 def gradient(u, p, rhs_mom, FncSp, visc1, viscosity_min, yield_strength, 
-             dx=None, dx1=None, visc2=0.0, dx2=None, stab=None):
+             dx=None, dx1=None, visc2=0.0, dx2=None, 
+             visc3=0.0, dx3=None, stab=None):
     '''
     Creates the weak form for the gradient:
 
@@ -248,19 +283,46 @@ def gradient(u, p, rhs_mom, FncSp, visc1, viscosity_min, yield_strength,
     else:
         visc2_stress = 0.0
 
+    if dx3 is not None:
+        visc3_stress = Abstract.WeakForm_Phi.gradient(U=U, U_test=U_test,
+            dPhi=dPhi(sigma, 1e16, visc3),
+            reg=Reg(viscosity_min), dx=dx3)
+    else:
+        visc3_stress = 0.0
+
     grad_press  = -p*fd.div(u_test)*dx
     div_vel     = -fd.div(u)*p_test*dx
     rhs_vel     = fd.inner(rhs_mom, u_test)*dx
 
-    grad = visc1_stress + visc2_stress + grad_press + div_vel - rhs_vel
+    grad = visc1_stress + visc2_stress + visc3_stress + grad_press + div_vel - rhs_vel
     #if stab is not None:
     #    h = fd.CellDiameter(FncSp.mesh())
     #    grad = grad + _stabilization(p, p_test, h, stab) - \
     #                  _stabilizationRhs(rhs_mom, p_test, h, stab)
     return grad
 
+def precondvisc(u, p, FncSp, visc1, viscosity_min, yield_strength, visc2=None):
+
+    U         = fd.sym(fd.nabla_grad(u))
+    sigma     = fd.sqrt(fd.inner(0.5*U, U))
+
+    precondvisc1 = Abstract.WeakForm_Phi.precondvisc(U, 
+                               dPhi=dPhi(sigma, yield_strength, visc1), 
+                               reg=Reg(viscosity_min))
+
+    if visc2 is not None:
+        precondvisc2 = Abstract.WeakForm_Phi.precondvisc(U, 
+                                   dPhi=dPhi(sigma, 1e16, visc2), 
+                                   reg=Reg(viscosity_min))
+        precondvisc2 = 2*visc2
+        return precondvisc1, precondvisc2
+    
+    return precondvisc1
+    
+
 def hessian_NewtonStandard(u, p, FncSp, visc1, viscosity_min, yield_strength, 
-                           dx=None, dx1=None, visc2=0.0, dx2=None, stab=None):
+                           dx=None, dx1=None, visc2=0.0, dx2=None, 
+                           visc3=0.0, dx3=None, stab=None):
     '''
     Creates the weak form for the Hessian of the standard Newton linearization:
 
@@ -313,10 +375,19 @@ def hessian_NewtonStandard(u, p, FncSp, visc1, viscosity_min, yield_strength,
     else:
         visc2_stress = 0.0
 
+    if dx3 is not None:
+        visc3_stress = Abstract.WeakForm_Phi.hessian_NewtonStandard(U=U,
+                           U_trial=U_trial, U_test=U_test,
+                           dPhi=dPhi(sigma, 1e16, visc3),
+                           dsqPhi=dsqPhi(sigma, 1e16, visc3),
+                           reg=Reg(viscosity_min), dx=dx3)
+    else:
+        visc3_stress = 0.0
+
     grad_press = -p_trial*fd.div(u_test)*dx
     div_vel    = -fd.div(u_trial)*p_test*dx
 
-    hess         = visc1_stress + visc2_stress + grad_press + div_vel
+    hess         = visc1_stress + visc2_stress + visc3_stress + grad_press + div_vel
     #if stab is not None:
     #    h = fd.CellDiameter(FncSp.mesh())
     #    hess = hess + _stabilization(p_trial, p_test, h, stab)
@@ -324,7 +395,7 @@ def hessian_NewtonStandard(u, p, FncSp, visc1, viscosity_min, yield_strength,
 
 def hessian_NewtonStressvel(u, p, PrimalFncSp, S, visc1, viscosity_min, 
                             yield_strength, dx=None, dx1=None, visc2=0.0, 
-                            dx2=None, stab=None):
+                            dx2=None, visc3=0.0, dx3=None, stab=None):
     '''
     Creates the weak form for the Hessian of the stress-vel Newton linearization:
 
@@ -380,9 +451,20 @@ def hessian_NewtonStressvel(u, p, PrimalFncSp, S, visc1, viscosity_min,
     else:
         visc2_stress = 0.0
 
+    if dx3 is not None:
+        scale3 = math.sqrt(3)*1e16
+        visc3_stress = Abstract.WeakForm_Phi.hessian_NewtonStressvel(U=U,
+            U_trial=U_trial, U_test=U_test, S=S,
+            dPhi=dPhi(sigma, 1e16, visc3),
+            dsqPhi=dsqPhi(sigma, 1e16, visc3),
+            scale=scale3,
+            reg=Reg(viscosity_min), dx=dx3)
+    else:
+        visc3_stress = 0.0
+
     grad_press   = -p_trial*fd.div(u_test)*dx
     div_vel      = -fd.div(u_trial)*p_test*dx
-    hess         = visc1_stress + visc2_stress + grad_press + div_vel
+    hess         = visc1_stress + visc2_stress + visc3_stress + grad_press + div_vel
     #if stab is not None:
     #    h = fd.CellDiameter(PrimalFncSp.mesh())
     #    hess = hess + _stabilization(p_trial, p_test, h, stab)
@@ -390,7 +472,8 @@ def hessian_NewtonStressvel(u, p, PrimalFncSp, S, visc1, viscosity_min,
 
 def hessian_NewtonStressvelSym(u, p, PrimalFncSp, S, visc1, viscosity_min, 
                                yield_strength, dx=None, dx1=None, visc2=0.0, 
-                               dx2=None, stab=None):
+                               dx2=None, 
+                               visc3=0.0, dx3=None, stab=None):
     '''
     Creates the weak form for the Hessian of the symmetrized stress-vel Newton 
     linearization:
@@ -451,14 +534,26 @@ def hessian_NewtonStressvelSym(u, p, PrimalFncSp, S, visc1, viscosity_min,
     else:
         visc2_stress = 0.0
 
-    hess         = visc1_stress + visc2_stress + grad_press + div_vel
+    if dx3 is not None:
+        scale3 = math.sqrt(2)*1e16
+        visc3_stress = Abstract.WeakForm_Phi.hessian_NewtonStressvelSym(U=U,
+            U_trial=U_trial, U_test=U_test, S=S,
+            dPhi=dPhi(sigma, 1e16, visc3),
+            dsqPhi=dsqPhi(sigma, 1e16, visc3),
+            scale=scale3,
+            reg=Reg(viscosity_min), dx=dx3)
+    else:
+        visc3_stress = 0.0
+
+    hess         = visc1_stress + visc2_stress + visc3_stress + grad_press + div_vel
     #if stab is not None:
     #    h = fd.CellDiameter(PrimalFncSp.mesh())
     #    hess = hess + _stabilization(p_trial, p_test, h, stab)
     return hess
 
 def hessian_dualStep(u, u_step, S, DualFncSp, visc1, viscosity_min, 
-                     yield_strength, dx=None, dx1=None, visc2=0.0, dx2=None):
+                     yield_strength, dx=None, dx1=None, visc2=0.0, dx2=None,
+                     visc3=0.0, dx3=None):
     '''
     Creates the weak form for step of dual variable (viscous stress tensor, tau)
     '''
@@ -483,10 +578,17 @@ def hessian_dualStep(u, u_step, S, DualFncSp, visc1, viscosity_min,
                           dPhi=dPhi(sigma, 1e16, visc2),
                           dsqPhi=dsqPhi(sigma, 1e16, visc2),
                           scale=scale2, dx=dx2)
+    if dx3 is not None:
+        scale3 = math.sqrt(2)*1e16
+        S_step = S_step + Abstract.WeakForm_Phi.dualstepNewtonStressvel(S=S, 
+                          S_test=fd.TestFunction(DualFncSp),U=U, U_step=U_step, 
+                          dPhi=dPhi(sigma, 1e16, visc3),
+                          dsqPhi=dsqPhi(sigma, 1e16, visc3),
+                          scale=scale2, dx=dx3)
     return S_step
 
 def dualresidual(S, u, DualFncSp, visc1, viscosity_min, yield_strength, dx=None, 
-                 dx1=None, visc2=0.0, dx2=None):
+                 dx1=None, visc2=0.0, dx2=None, visc3=0.0, dx3=None):
     '''
     Creates the weak form for residual of dual variable (viscous stress tensor, 
     tau)
@@ -510,6 +612,12 @@ def dualresidual(S, u, DualFncSp, visc1, viscosity_min, yield_strength, dx=None,
                         S_test=fd.TestFunction(DualFncSp),U=U, 
                         dPhi=dPhi(sigma, 1e16, visc2),
                         scale=scale2, dx=dx2)
+    if dx3 is not None:
+        scale3 = math.sqrt(2)*1e16
+        res = res + Abstract.WeakForm_Phi.dualResidual(S=S, 
+                        S_test=fd.TestFunction(DualFncSp),U=U, 
+                        dPhi=dPhi(sigma, 1e16, visc3),
+                        scale=scale3, dx=dx3)
     return res
 
 def hessian_dualUpdate_boundMaxMagnitude(S, DualFncSp, max_magn):

@@ -88,10 +88,10 @@ class VariableViscosityStokesProblem():
                 basemh = MeshHierarchy(basemesh, nref, callbacks=(before,after))
                 mh = ExtrudedMeshHierarchy(basemh, height=self.Lz, 
                                            base_layer=self.Nz)
-        else:
-            mh = MeshHierarchy(basemesh, nref, reorder=True, 
-                               callbacks=(before,after),
-                               distribution_parameters=distp)
+            else:
+                mh = MeshHierarchy(basemesh, nref, reorder=True, 
+                                   callbacks=(before,after),
+                                   distribution_parameters=distp)
         for mesh in mh:
             load_balance(mesh)
         self.nref = nref
@@ -213,13 +213,12 @@ class VariableViscosityStokesProblem():
         Z = V*Q
         u,p = TrialFunctions(Z)
         v,q = TestFunctions(Z)
-        mu = self.mu_fun(mesh)
+        mu = self.mufun(mesh)
 
+        #F = self.get_weakform_A(mesh, bcs)
         if self.discretisation == "cg":
             # (1,1) block
             F = (mu*inner(2*sym(grad(u)), grad(v)))*dx(degree=deg)
-            # (1,2), (2,1) block
-            F += -p*div(v)*dx(degree=divdegree)-div(u)*q*dx(degree=divdegree)
         elif self.discretisation == "hdiv":
             sigma = Constant(100.)
             n = FacetNormal(mesh)
@@ -238,8 +237,47 @@ class VariableViscosityStokesProblem():
               - mu*inner(avg(2*sym(grad(v))),2*avg(outer(u, n)))*dS(degree=deg)\
               + mu*sigma/avg(h)*inner(2*avg(outer(u,n)),\
                                       2*avg(outer(v,n)))*dS(degree=deg)
-            # (1,2), (2,1) block
-            F += -p*div(v)*dx(degree=divdegree)-div(u)*q*dx(degree=divdegree)
+            # Stablization
+            for bc in bcs:
+                if "DG" in str(bc._function_space):
+                    continue
+                g = bc.function_arg
+                bid = bc.sub_domain
+                F += nitsche(u, v, mu, bid, g)
+        else:
+            raise ValueError("unknown discretisation %s" %self.discretisation)
+        F += -p*div(v)*dx(degree=divdegree)-div(u)*q*dx(degree=divdegree)
+        return F
+
+    def get_weakform_A(self, mesh, bcs=None):
+        deg = self.quaddeg
+        divdegree = None
+        V, Q = self.get_functionspace(mesh)
+        u = TrialFunction(V)
+        v = TestFunction(V)
+        mu = self.mufun(mesh)
+
+        if self.discretisation == "cg":
+            # (1,1) block
+            F = (mu*inner(2*sym(grad(u)), grad(v)))*dx(degree=deg)
+        elif self.discretisation == "hdiv":
+            sigma = Constant(100.)
+            n = FacetNormal(mesh)
+            if self.quad:
+                h = CellDiameter(mesh)
+            else:
+                h = Constant(sqrt(2)/(N*(2**nref)))
+            def nitsche(u, v, mu, bid, g):
+                my_ds = ds if bid == "on_boundary" else ds(bid)
+                return -inner(outer(v,n),2*mu*sym(grad(u)))*my_ds(degree=deg) \
+                       -inner(outer(u-g,n),2*mu*sym(grad(v)))*my_ds(degree=deg) \
+                       +mu*(sigma/h)*inner(v,u-g)*my_ds(degree=deg)
+            # (1,1) block with stablization
+            F = (mu*inner(2*sym(grad(u)), grad(v)))*dx(degree=deg)\
+              - mu*inner(avg(2*sym(grad(u))),2*avg(outer(v, n)))*dS(degree=deg)\
+              - mu*inner(avg(2*sym(grad(v))),2*avg(outer(u, n)))*dS(degree=deg)\
+              + mu*sigma/avg(h)*inner(2*avg(outer(u,n)),\
+                                      2*avg(outer(v,n)))*dS(degree=deg)
             # Stablization
             for bc in bcs:
                 if "DG" in str(bc._function_space):
@@ -251,40 +289,28 @@ class VariableViscosityStokesProblem():
             raise ValueError("unknown discretisation %s" %self.discretisation)
         return F
             
-    def set_viscosity(self, mu_fun, mu_max, mu_min): 
-        self.mu_fun = mu_fun
-        self.mu_max = mu_max
-        self.mu_min = mu_min
+    def set_viscosity(self, mufun): 
+        self.mufun = mufun
 
     def get_viscosity(self): 
-        return self.mu_fun
+        return self.mufun
 
-    def get_A_weak(self, u, v, mu):
-        deg = self.quaddeg
-        discretisation = self.discretisation
-        if discretisation == "cg":
-            return (mu*inner(2*sym(grad(u)), grad(v)))*dx(degree=deg)
-        else:
-            return (mu*inner(2*sym(grad(u)), grad(v)))*dx(degree=deg)\
-                - mu*inner(avg(2*sym(grad(u))),2*avg(outer(v, n)))\
-                                                          *dS(degree=deg) \
-                - mu*inner(avg(2*sym(grad(v))),2*avg(outer(u, n)))\
-                                                          *dS(degree=deg) \
-                + mu*sigma/avg(h)*inner(2*avg(outer(u,n)),\
-                                        2*avg(outer(v,n)))*dS(degree=deg)
+    def set_measurelist(self, dxlist):
+        self.dxlist = dxlist
 
     def get_W_mat(self, mesh, case, w):
         deg = self.quaddeg
-        mu = self.mu_fun(mesh)
         V, Q = self.get_functionspace(mesh)
         p = TrialFunction(Q)
         q = TestFunction(Q)
         if case == 4:
             W = assemble(Tensor(inner(p,q)*dx).inv, mat_type='aij').petscmat
         elif case == 5:
+            mu = self.mufun(mesh)
             W = assemble(Tensor(1.0/mu*inner(p,q)*dx(degree=deg)).inv,\
                                         mat_type='aij').petscmat
         elif case == 6:
+            mu = self.mufun(mesh)
             W = w*assemble(Tensor(1.0/mu*inner(p,q)*dx).inv).petscmat +\
                 (1-w)*assemble(Tensor(inner(p,q)*dx).inv).petscmat
         else:
@@ -315,7 +341,8 @@ class VariableViscosityStokesProblem():
         self.quad=quad
         self.quaddeg = quaddegree
         self.quaddivdeg = quaddivdegree
-        self.mu_fun = None
+        self.mufun = None
+        self.dxlist = [dx]
         self.mu_min = -1
         self.mu_max = -1
         self.nref = -1
@@ -325,6 +352,8 @@ class VariableViscosityStokesProblem():
         self.lvproblem = None
 
 class VariableViscosityStokesSolver():
+    def set_precondviscosity(self, mufunlist): 
+        self.precond_mulist = mufunlist
     def set_BTWB_dicts(self):
         BBCTWB_dict = {} # These are of type PETSc.Mat
         BBCTW_dict = {} # These are of type PETSc.Mat
@@ -361,7 +390,6 @@ class VariableViscosityStokesSolver():
             quad = self.problem.quad
             nref = self.problem.nref
             gamma = self.gamma
-            mu_transfer = self.problem.get_viscosity()
             asmbackend = self.asmbackend
             def BTWBcb(level):
                 return self.BBCTWB_dict[level]
@@ -383,9 +411,10 @@ class VariableViscosityStokesSolver():
                     return A
             V, Q = self.problem.get_functionspace(self.problem.mesh)
             tdim = self.problem.mesh.topological_dimension()
-            # vtransfer = AlgebraicSchoeberlTransfer((mu_transfer, gamma), 
-            #                  A_callback, BTWB_callback, tdim, 'uniform', 
-            #                  backend='lu', hexmesh=(dim == 3 and quad))
+            mu_transfer = self.problem.get_viscosity()
+            #vtransfer = AlgebraicSchoeberlTransfer((mu_transfer, gamma), 
+            #                 A_callback, BTWB_callback, tdim, 'uniform', 
+            #                 backend='lu', hexmesh=(dim == 3 and quad))
             vtransfer = AlgebraicSchoeberlTransfer((mu_transfer, gamma), 
                                  Acb, BTWBcb, tdim, 'uniform',
                                  backend=asmbackend,
@@ -442,7 +471,7 @@ class VariableViscosityStokesSolver():
             }
 
             mg_levels_solver_rich = {
-                "ksp_type": "richardson",
+                "ksp_type": "fgmres",
                 "ksp_max_it": 5,
                 "pc_type": "bjacobi",
             }
@@ -488,15 +517,15 @@ class VariableViscosityStokesSolver():
 
             params = {
                 "snes_type": "ksponly",
-                #"snes_monitor": None,
+                "snes_monitor": None,
                 "mat_type": "nest",
                 "ksp_type": "fgmres",
-                "ksp_gmres_restart": 100,
+                "ksp_gmres_restart": 200,
                 "ksp_rtol": 1.0e-6,
                 "ksp_atol": 1.0e-10,
                 "ksp_max_it": 1000,
                 #"ksp_view": None,
-                #"ksp_monitor_true_residual": None,
+                "ksp_monitor_true_residual": None,
                 #"ksp_converged_reason": None,
                 "pc_type": "fieldsplit",
                 "pc_fieldsplit_type": "schur",
@@ -547,22 +576,28 @@ class VariableViscosityStokesSolver():
 
     def set_linearvariationalsolver(self,
                                     augtopleftblock=True,
-                                    modifyresidual=True):
+                                    modifyresidual=True, 
+                                    augtopleftblock_cb=None,
+                                    modifyresidual_cb=None):
         params = self.params
         nsp = self.nsp
         mesh = self.problem.mesh
         V, Q = self.problem.get_functionspace(mesh)
         Z = V*Q
-        mu = self.problem.mu_fun(mesh)
+
+        if self.precond_mulist is None:
+            mulist = [self.problem.mufun(mesh)]
+        else:
+            mulist = self.precond_mulist
+        dxlist = self.problem.dxlist
         deg = self.problem.quaddeg
-        dr = self.problem.mu_max/self.problem.mu_min
+        dr = 1.0
         nref = self.problem.nref
-        appctx = {"nu_expr": mu, "gamma": self.gamma, 
-                  "dr":dr, "case":self.case, "w":self.w, "deg":deg}
+        appctx = {"nu_exprlist": mulist, "gamma": self.gamma, 
+                  "dr":dr, "case":self.case, "w":self.w, "deg":deg, 
+                  "dxlist":dxlist}
 
         def aug_topleftblock(X, J, ctx):
-            if augtopleftblock is not True:
-                return
             mh, level = get_level(ctx._x.ufl_domain())
             BTWBlevel = self.BBCTWB_dict[level]
             if level == nref:
@@ -576,8 +611,6 @@ class VariableViscosityStokesSolver():
                 J.setLGMap(rmap, cmap)
 
         def modify_residual(X, F):
-            if modifyresidual is not True:
-                return
             vel_is = Z._ises[0]
             pre_is = Z._ises[1]
             Fvel = F.getSubVector(vel_is)
@@ -587,14 +620,26 @@ class VariableViscosityStokesSolver():
             F.restoreSubVector(vel_is, Fvel)
             F.restoreSubVector(pre_is, Fpre)
 
+        if augtopleftblock:
+            post_jcb = augtopleftblock_cb if augtopleftblock_cb is not None \
+                       else aug_topleftblock
+        else:
+            post_jcb = None
+
+        if modifyresidual:
+            post_fcb = modifyresidual_cb if modifyresidual_cb is not None \
+                       else modify_residual
+        else:
+            post_fcb = None
+
         solver = LinearVariationalSolver(self.problem.lvproblem,
                                      solver_parameters=params,
                                      options_prefix="ns_",
-                                     post_jacobian_callback=aug_topleftblock,
-                                     post_function_callback=modify_residual,
+                                     post_jacobian_callback=post_jcb,
+                                     post_function_callback=post_fcb,
                                      appctx=appctx, nullspace=nsp)
         self.lvsolver = solver
-        self.set_transfers()
+        #self.set_transfers()
         self.Z = Z
 
     def get_iterationnum(self):
@@ -617,6 +662,7 @@ class VariableViscosityStokesSolver():
         self.BBCTWB_dict = None
         self.BBCTW_dict = None
         self.lvsolver = None
+        self.precond_mulist = None
 
         ## default setup
         if setBTWBdics is True:
