@@ -10,13 +10,17 @@ class DGMassInv(PCBase):
         u = TrialFunction(V)
         v = TestFunction(V)
 
-        nu_fun    = appctx["nu_fun"]
-        nu_expr    = appctx["nu_expr"]
-        gamma = appctx["gamma"]
-        dr    = appctx["dr"]
-        case  = appctx["case"]
-        w     = appctx["w"]
-        deg   = appctx["deg"]
+        nu_exprlist = appctx["nu_exprlist"]
+        dxlist = appctx["dxlist"]
+        assert len(nu_exprlist) == len(dxlist)
+
+        nu_expr = nu_exprlist[0]
+        dx      = dxlist[0]
+        gamma   = appctx["gamma"]
+        dr      = appctx["dr"]
+        case    = appctx["case"]
+        w       = appctx["w"]
+        deg     = appctx["deg"]
 
         self.viscmassinv = None
         self.massinv = None
@@ -28,39 +32,39 @@ class DGMassInv(PCBase):
             massinv = assemble(Tensor(inner(u, v)*dx).inv)
             self.massinv = massinv.petscmat
             self.scale = nu_fun.copy(deepcopy=True)
-            self.scale.project(-(1.0+gamma))
+            self.scale = Function(V).project(-(1.0+gamma))
         elif case == 1:
             massinv = assemble(Tensor(inner(u, v)*dx).inv)
             self.massinv = massinv.petscmat
-            self.scale = nu_fun.copy(deepcopy=True)
+            nu_fun = Function(V).interpolate(nu_expr)
             self.scale.project(-(nu_fun+gamma))
         elif case == 2:
             massinv = assemble(Tensor(inner(u, v)*dx).inv)
             self.massinv = massinv.petscmat
-            self.scale = nu_fun.copy(deepcopy=True)
-            self.scale.project(-(sqrt(dr)+gamma))
+            self.scale = Function(V).project(-(sqrt(dr)+gamma))
         elif case == 3 or case == 4:
-            viscmassinv = assemble(Tensor(-1.0/nu_expr*inner(u, v)*dx(degree=deg)).inv)
+            weak = -1.0/nu_expr*inner(u,v)*dx(degree=deg)
+            viscmassinv = assemble(Tensor(weak).inv)
+
             massinv = assemble(Tensor(inner(u, v)*dx).inv)
             self.viscmassinv = viscmassinv.petscmat
             self.massinv = massinv.petscmat
-            self.scale = nu_fun.copy(deepcopy=True)
-            self.scale.project(-gamma)
+            self.scale = Function(V).project(-gamma)
         elif case == 5:
-            viscmassinv = assemble(Tensor(-1.0/nu_expr*inner(u, v)*dx(degree=deg)).inv)
+            viscmassinv = assemble(Tensor(-1.0/nu_expr*inner(u, v)*\
+                                                           dx(degree=deg)).inv)
             self.viscmassinv = viscmassinv.petscmat
-            self.scale = nu_fun.copy(deepcopy=True)
-            self.scale.project(1.0+gamma)
+            self.scale = Function(V).project(1.0+gamma)
         elif case == 6:
             ## P = Shat - gamma*W
             # Shat = -viscmassinv
             # W = w*viscmassinv + (1-w)*massinv
             massinv     = assemble(Tensor(inner(u, v)*dx).inv)
-            viscmassinv = assemble(Tensor(1.0/nu_expr*inner(u, v)*dx(degree=deg)).inv)
+            viscmassinv = assemble(Tensor(1.0/nu_expr*inner(u, v)*\
+                                                           dx(degree=deg)).inv)
             self.viscmassinv = viscmassinv.petscmat
             self.massinv     = massinv.petscmat
-            self.scale = nu_fun.copy(deepcopy=True)
-            self.scale.project(-gamma)
+            self.scale = Function(V).project(-gamma)
             self.w = w
         else:
             raise ValueError("Unknown type of preconditioner %i" % case)
