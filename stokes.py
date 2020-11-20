@@ -72,6 +72,7 @@ def after(dm, i):
     for p in range(*dm.getDepthStratum(0)):
         dm.setLabelValue("prolongation", p, i+2)
 
+PETSc.Sys.Print("before mesh hierarchy")
 def mesh_hierarchy(hierarchy, nref, callbacks, distribution_parameters):
     if dim == 2:
         baseMesh = RectangleMesh(N, N, 4, 4, distribution_parameters=distp, \
@@ -96,6 +97,7 @@ def mesh_hierarchy(hierarchy, nref, callbacks, distribution_parameters):
 mh = mesh_hierarchy(hierarchy, nref, (before, after), distp)
 for mesh in mh:
     load_balance(mesh)
+PETSc.Sys.Print("after mesh hierarchy")
 
 mesh = mh[-1]
 #File('mesh.pvd').write(mesh)
@@ -324,7 +326,8 @@ fieldsplit_0_mg = {
     "ksp_convergence_test": "skip",
     "pc_type": "mg",
     "pc_mg_type": "full",
-    "mg_levels": mg_levels_solver,
+    "pc_mg_log": None,
+    #"mg_levels": mg_levels_solver,
     "mg_coarse_pc_type": "python",
     "mg_coarse_pc_python_type": "firedrake.AssembledPC",
     "mg_coarse_assembled_pc_type": "lu",
@@ -334,6 +337,7 @@ fieldsplit_0_mg = {
 params = {
     "snes_type": "ksponly",
     "snes_monitor": None,
+    "log_view":  None,
     "mat_type": "nest",
     "ksp_type": "fgmres",
     "ksp_rtol": 1.0e-6,
@@ -556,7 +560,7 @@ for i in range(args.itref+1):
     #    with assemble(action(F, z), bcs=homogenize(bcs)).dat.vec_ro as w:
     #        PETSc.Sys.Print('Residual without grad-div', w.norm())
 
-# File("u.pvd").write(z.split()[0])
+#File("u.pvd").write(z.split()[0])
 # uncomment lines below to write out the solution. then run with --case 3 first
 # and then with --case 4 after to make sure that the 'manual/triple matrix
 # product' augmented lagrangian implementation does the same thing as the

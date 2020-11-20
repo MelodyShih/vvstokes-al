@@ -5,3 +5,7 @@ __pycache__/*
 *.npy
 *.dat
 *.png
+*.out
+*.err
+*.o*
+*.e*
