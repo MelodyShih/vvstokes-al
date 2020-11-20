@@ -88,10 +88,10 @@ class VariableViscosityStokesProblem():
                 basemh = MeshHierarchy(basemesh, nref, callbacks=(before,after))
                 mh = ExtrudedMeshHierarchy(basemh, height=self.Lz, 
                                            base_layer=self.Nz)
-            else:
-                mh = MeshHierarchy(basemesh, nref, reorder=True, 
-                                   callbacks=(before,after),
-                                   distribution_parameters=distp)
+        else:
+            mh = MeshHierarchy(basemesh, nref, reorder=True, 
+                               callbacks=(before,after),
+                               distribution_parameters=distp)
         for mesh in mh:
             load_balance(mesh)
         self.nref = nref
