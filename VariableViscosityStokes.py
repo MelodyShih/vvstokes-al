@@ -83,8 +83,7 @@ class VariableViscosityStokesProblem():
             for p in range(*dm.getDepthStratum(0)):
                 dm.setLabelValue("prolongation", p, i+2)
 
-        if dim == 3:
-            if self.quad:
+        if dim == 3 and self.quad:
                 basemh = MeshHierarchy(basemesh, nref, callbacks=(before,after))
                 mh = ExtrudedMeshHierarchy(basemh, height=self.Lz, 
                                            base_layer=self.Nz)
@@ -92,6 +91,7 @@ class VariableViscosityStokesProblem():
             mh = MeshHierarchy(basemesh, nref, reorder=True, 
                                callbacks=(before,after),
                                distribution_parameters=distp)
+
         for mesh in mh:
             load_balance(mesh)
         self.nref = nref

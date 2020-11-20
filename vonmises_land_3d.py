@@ -121,7 +121,8 @@ vel_inflow = Constant((BOUNDARY_INFLOW_VELOCITY, 0.0, 0.0))
 
 class LeftInflowExpression(Expression):
     def eval(self, value, x):
-        value[0] = x[2]*BOUNDARY_INFLOW_VELOCITY
+        c = 0.2
+        value[0] = (x[2]+exp(-(x[2]-2)**2/(2*c**2)))*BOUNDARY_INFLOW_VELOCITY
         value[1] = 0.0
         value[2] = 0.0
 
@@ -130,7 +131,8 @@ class LeftInflowExpression(Expression):
 
 class RightInflowExpression(Expression):
     def eval(self, value, x):
-        value[0] = x[2]*BOUNDARY_INFLOW_VELOCITY
+        c = 0.2
+        value[0] = -(x[2]+exp(-(x[2]-2)**2/(2*c**2)))*BOUNDARY_INFLOW_VELOCITY
         value[1] = 0.0
         value[2] = 0.0
 
@@ -427,15 +429,15 @@ if OUTPUT_VTK:
     edotp_t = TestFunction(Vd1)
     solve(inner(edotp_t, (edotp - strainrateII))*dx == 0.0, edotp)
     Abstract.Vector.scale(edotp, REF_STRAIN_RATE)
-    File("vtk/land3d_strainrateII.pvd").write(edotp)
+    File("vtk/land3d_strainrateII_2.pvd").write(edotp)
 
-    Vd1 = FunctionSpace(mesh, "DG", 0)
+    Vd1 = FunctionSpace(mesh, "DG", k-1)
     edotp   = Function(Vd1)
     edotp_t = TestFunction(Vd1)
     solve((inner(edotp_t, (edotp - visceff))*dx_upper+ \
            inner(edotp_t, (edotp - visc_lower))*dx_lower+ \
            inner(edotp_t, (edotp - visc_middle))*dx_middle) == 0.0, edotp)
-    File("vtk/land3d_visceff.pvd").write(edotp)
+    File("vtk/land3d_visceff_2.pvd").write(edotp)
 
-    File("vtk/land3d_solution_u.pvd").write(sol_u)
-    File("vtk/land3d_solution_p.pvd").write(sol_p)
+    File("vtk/land3d_solution_u_2.pvd").write(sol_u)
+    File("vtk/land3d_solution_p_2.pvd").write(sol_p)
