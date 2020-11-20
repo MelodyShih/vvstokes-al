@@ -32,9 +32,10 @@ parser.add_argument("--dim", type=int, default=2)
 parser.add_argument("--quad-deg", type=int, dest="quad_deg", default=20)
 parser.add_argument("--rebalance", dest="rebalance", default=False, action="store_true")
 parser.add_argument("--asmbackend", type=str, choices=['tinyasm', 'petscasm'], default="tinyasm")
+parser.add_argument("--nsinker", type=int, default=8)
 args, _ = parser.parse_known_args()
 
-
+nsinker = args.nsinker
 nref = args.nref
 dr = args.dr
 k = args.k
@@ -97,7 +98,7 @@ for mesh in mh:
     load_balance(mesh)
 
 mesh = mh[-1]
-File('mesh.pvd').write(mesh)
+#File('mesh.pvd').write(mesh)
 if args.discretisation == "hdiv":
     if args.quad:
         V = FunctionSpace(mesh, "RTCF", k)
@@ -163,7 +164,7 @@ def chi_n(mesh):
     # indis = [indi(Constant((4*(cx+1)/3, 4*(cy+1)/3))) for cx in range(2) for cy in range(2)]
     indis = []
     np.random.seed(1)
-    for i in range(8):
+    for i in range(nsinker):
         if dim == 2:
             cx = 2+np.random.uniform(-1,1)
             cy = 2+np.random.uniform(-1,1)
@@ -286,6 +287,18 @@ fieldsplit_0_hypre = {
     "pc_type": "hypre",
 }
 
+mg_levels_solver_rich = {
+    "ksp_type": "fgmres",
+    "ksp_max_it": 5,
+    "pc_type": "bjacobi",
+}
+
+mg_levels_solver_cheb = {
+    "ksp_type": "chebyshev",
+    "ksp_max_it": 5,
+    "pc_type": "bjacobi",
+}
+
 mg_levels_solver = {
     # "ksp_monitor_true_residual": None,
     "ksp_type": "fgmres",
@@ -325,7 +338,7 @@ params = {
     "ksp_type": "fgmres",
     "ksp_rtol": 1.0e-6,
     "ksp_atol": 1.0e-10,
-    "ksp_max_it": 100,
+    "ksp_max_it": 1000,
     "ksp_monitor_true_residual": None,
     "ksp_converged_reason": None,
     "pc_type": "fieldsplit",
@@ -336,6 +349,13 @@ params = {
 }
 
 if args.solver_type == "almg":
+    fieldsplit_0_mg["mg_levels"] = mg_levels_solver
+    params["fieldsplit_0"] = fieldsplit_0_mg
+elif args.solver_type == "almgcheb":
+    fieldsplit_0_mg["mg_levels"] = mg_levels_solver_cheb
+    params["fieldsplit_0"] = fieldsplit_0_mg
+elif args.solver_type == "almgrich":
+    fieldsplit_0_mg["mg_levels"] = mg_levels_solver_rich
     params["fieldsplit_0"] = fieldsplit_0_mg
 elif args.solver_type == "allu":
     params["fieldsplit_0"] = fieldsplit_0_lu
@@ -536,7 +556,7 @@ for i in range(args.itref+1):
     #    with assemble(action(F, z), bcs=homogenize(bcs)).dat.vec_ro as w:
     #        PETSc.Sys.Print('Residual without grad-div', w.norm())
 
-File("u.pvd").write(z.split()[0])
+# File("u.pvd").write(z.split()[0])
 # uncomment lines below to write out the solution. then run with --case 3 first
 # and then with --case 4 after to make sure that the 'manual/triple matrix
 # product' augmented lagrangian implementation does the same thing as the
