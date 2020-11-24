@@ -73,8 +73,8 @@ REF_STRAIN_RATE = REF_VELOCITY*YEAR_PER_SEC/REF_HEIGHT
 REF_STRESS_RATE = 2.0*REF_STRAIN_RATE*REF_VISCOSITY
 
 VISC_UPPER_SCALED   = 1.e24/REF_VISCOSITY
-VISC_MIDDLE_SCALED  = 1.e21/REF_VISCOSITY
-VISC_LOWER_SCALED   = 1.e19/REF_VISCOSITY
+VISC_MIDDLE_SCALED  = 1.e20/REF_VISCOSITY
+VISC_LOWER_SCALED   = 1.e17/REF_VISCOSITY
 BOUNDARY_INFLOW_VELOCITY = 1.0
 
 # nolinear solver parameters
@@ -122,7 +122,7 @@ vel_inflow = Constant((BOUNDARY_INFLOW_VELOCITY, 0.0, 0.0))
 class LeftInflowExpression(Expression):
     def eval(self, value, x):
         c = 0.2
-        value[0] = (x[2]+exp(-(x[2]-2)**2/(2*c**2)))*BOUNDARY_INFLOW_VELOCITY
+        value[0] = (x[2]+1)*BOUNDARY_INFLOW_VELOCITY
         value[1] = 0.0
         value[2] = 0.0
 
@@ -132,7 +132,7 @@ class LeftInflowExpression(Expression):
 class RightInflowExpression(Expression):
     def eval(self, value, x):
         c = 0.2
-        value[0] = -(x[2]+exp(-(x[2]-2)**2/(2*c**2)))*BOUNDARY_INFLOW_VELOCITY
+        value[0] = -(x[2]+1)*BOUNDARY_INFLOW_VELOCITY
         value[1] = 0.0
         value[2] = 0.0
 
@@ -297,7 +297,10 @@ step_length  = 0.0
 
 # assemble mass matrices
 if args.linearization == 'stressvel':
-    Md = assemble(Abstract.WeakForm_Phi.mass(Vd))
+    u = TrialFunction(Vd)
+    v = TestFunction(Vd)
+    Mdinv = assemble(Tensor(inner(u, v)*dx).inv).petscmat
+    #Md = assemble(Abstract.WeakForm_Phi.mass(Vd))
 
 if MONITOR_NL_ITER:
     PETSc.Sys.Print('{0:<3} "{1:>6}"{2:^20}{3:^14}{4:^15}{5:^10}'.format(
@@ -333,7 +336,9 @@ for itn in range(NL_SOLVER_MAXITER+1):
             # project S to unit sphere
             Sprojweak = WeakForm.hessian_dualUpdate_boundMaxMagnitude(S, Vd, 1.0)
             b = assemble(Sprojweak)
-            solve(Md, S_proj.vector(), b)
+            Mdinv.mult(b.vector(), S_proj.vector()) 
+            #solve(Md, S_proj.vector(), b, 
+            #      solver_parameters={"ksp_monitor_true_residual": None, "ksp_view": None})
 
     # assemble linearized system
     vvstokesprob.set_bcsfun(bcstep_fun)
@@ -352,7 +357,7 @@ for itn in range(NL_SOLVER_MAXITER+1):
     lin_it_total += lin_it
     
     ## uncomment to compare solutions between augmented/unaugmented sys
-    #solve(hess == grad, step2, bcs_step)
+    #solve(hess == grad, step, bcs_step)
     #PETSc.Sys.Print("abstepute diff in vel:",\
     #       norm(step.split()[0]-step2.split()[0]))
     #PETSc.Sys.Print("relative diff in vel:",\
@@ -367,8 +372,10 @@ for itn in range(NL_SOLVER_MAXITER+1):
     # solve dual variable step
     if args.linearization == 'stressvel':
         Abstract.Vector.scale(step, -1.0)
-        b = assemble(dualStep)
-        solve(Md, S_step.vector(), b)
+        b = assemble(dualStep).petscmat
+        Mdinv.mult(b.vector(), S_step.vector()) 
+        #solve(Md, S_step.vector(), b, solver_parameters={"ksp_monitor_true_residual": None, 
+        #                                                 "ksp_type": "fgmres"})
         Abstract.Vector.scale(step, -1.0)
 
     # compute the norm of the gradient
@@ -429,15 +436,15 @@ if OUTPUT_VTK:
     edotp_t = TestFunction(Vd1)
     solve(inner(edotp_t, (edotp - strainrateII))*dx == 0.0, edotp)
     Abstract.Vector.scale(edotp, REF_STRAIN_RATE)
-    File("vtk/land3d_strainrateII_2.pvd").write(edotp)
+    File("/scratch1/04841/tg841407/stokes_2020-11-21/vtk/land3d_large_strainrateII.pvd").write(edotp)
 
-    Vd1 = FunctionSpace(mesh, "DG", k-1)
+    Vd1 = FunctionSpace(mesh, "DG", 0)
     edotp   = Function(Vd1)
     edotp_t = TestFunction(Vd1)
     solve((inner(edotp_t, (edotp - visceff))*dx_upper+ \
            inner(edotp_t, (edotp - visc_lower))*dx_lower+ \
            inner(edotp_t, (edotp - visc_middle))*dx_middle) == 0.0, edotp)
-    File("vtk/land3d_visceff_2.pvd").write(edotp)
+    File("/scratch1/04841/tg841407/stokes_2020-11-21/vtk/land3d_large_visceff.pvd").write(edotp)
 
-    File("vtk/land3d_solution_u_2.pvd").write(sol_u)
-    File("vtk/land3d_solution_p_2.pvd").write(sol_p)
+    File("/scratch1/04841/tg841407/stokes_2020-11-21/vtk/land3d_large_solution_u.pvd").write(sol_u)
+    File("/scratch1/04841/tg841407/stokes_2020-11-21/vtk/land3d_large_solution_p.pvd").write(sol_p)

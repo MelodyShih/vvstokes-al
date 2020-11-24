@@ -386,7 +386,7 @@ else:
     raise ValueError("please specify almg, allu or alamg for --solver-type")
 
 mu_fun= mu(mh[-1])
-appctx = {"nu_fun": mu_fun, "nu_expr": mu_expr(mh[-1]), "gamma": gamma, "dr":dr, "case":case, "w":w, "deg":deg}
+appctx = {"nu_fun": mu_fun, "dxlist": [dx], "nu_exprlist": [mu_expr(mh[-1])], "gamma": gamma, "dr":dr, "case":case, "w":w, "deg":deg}
 
 
 BBCTWB_dict = {} # These are of type PETSc.Mat
