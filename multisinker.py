@@ -65,6 +65,7 @@ gamma = Constant(args.gamma)
 dim = args.dim
 deg = args.quad_deg
 divdegree = None
+rebal = args.rebalance
 
 #======================================
 # Setup viscosity field mu(x)
@@ -114,7 +115,7 @@ vvstokesprob = VariableViscosityStokesProblem(dim, # dimension of the problem
                                     quaddivdegree=divdegree) # qaudrature divdeg                      
 # set basemesh, mesh hierarchy  
 basemesh = vvstokesprob.create_basemesh("rectangle", N, N, N, 4, 4, 4)
-vvstokesprob.set_meshhierarchy(basemesh, nref)
+vvstokesprob.set_meshhierarchy(basemesh, nref, rebal)
 # set viscosity field
 vvstokesprob.set_viscosity(mu_expr)
 

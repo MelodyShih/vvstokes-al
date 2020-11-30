@@ -55,14 +55,14 @@ class VariableViscosityStokesProblem():
             raise NotImplementedError('Unknown type of mesh "%s"'%basemeshtype)
         return baseMesh
 
-    def set_meshhierarchy(self, basemesh, nref, rebalance=False):
+    def set_meshhierarchy(self, basemesh, nref, rebal=False):
         dim = self.dim
         quad = self.quad
         distp = {"partition": True, 
                  "overlap_type": (DistributedMeshOverlapType.VERTEX, 1)}
         
         def before(dm, i):
-            if i == 0 and rebalance:
+            if i == 0 and rebal:
                 rebalance(dm, i) # rebalance the initial coarse mesh
             if dim == 3:
                 for p in range(*dm.getHeightStratum(2)):
@@ -73,7 +73,7 @@ class VariableViscosityStokesProblem():
                 dm.setLabelValue("prolongation", p, i+1)
 
         def after(dm, i):
-            if rebalance:
+            if rebal:
                 rebalance(dm, i) # rebalance all refined meshes
             if dim == 3:
                 for p in range(*dm.getHeightStratum(2)):
@@ -150,7 +150,7 @@ class VariableViscosityStokesProblem():
                     else:
                         eleu = VectorElement(Pk)
                     V = FunctionSpace(mesh, eleu)
-                    Vd_e = TensorElement('DG', mesh.ufl_cell(), k-1)
+                    Vd_e = TensorElement('DG', mesh.ufl_cell(), k)
                     Vd = FunctionSpace(mesh, Vd_e)
                     Q = FunctionSpace(mesh, "DG", 0)
             else:
@@ -383,7 +383,7 @@ class VariableViscosityStokesSolver():
         self.BBCTW_dict = BBCTW_dict 
         
     def set_transfers(self, transfers=None):
-        if transfers is None and self.solver_type == "almg" \
+        if transfers is None and self.solver_type == "almg"\
                              and self.problem.discretisation == "cg":
             lvsolver = self.lvsolver
             dim  = self.problem.dim
@@ -508,6 +508,7 @@ class VariableViscosityStokesSolver():
                 "ksp_convergence_test": "skip",
                 "pc_type": "mg",
                 "pc_mg_type": "full",
+                "pc_mg_log": None,
                 #"mg_levels": mg_levels_solver,
                 "mg_coarse_pc_type": "python",
                 "mg_coarse_pc_python_type": "firedrake.AssembledPC",
@@ -523,10 +524,10 @@ class VariableViscosityStokesSolver():
                 "ksp_gmres_restart": 200,
                 "ksp_rtol": 1.0e-6,
                 "ksp_atol": 1.0e-10,
-                "ksp_max_it": 1000,
+                "ksp_max_it": 200,
                 #"ksp_view": None,
                 "ksp_monitor_true_residual": None,
-                #"ksp_converged_reason": None,
+                "ksp_converged_reason": None,
                 "pc_type": "fieldsplit",
                 "pc_fieldsplit_type": "schur",
                 "pc_fieldsplit_schur_factorization_type": "full",
