@@ -1,3 +1,9 @@
+from mpi4py import MPI
+comm = MPI.COMM_WORLD
+from petsc4py import PETSc
+PETSc.Sys.popErrorHandler()
+PETSc.Log.begin()
+import numpy as np
 from firedrake import *
 from firedrake.petsc import PETSc
 from alfi.transfer import *
@@ -7,9 +13,6 @@ from firedrake.mg.utils import get_level
 from balance import load_balance, rebalance
 
 import argparse
-import numpy as np
-from petsc4py import PETSc
-PETSc.Sys.popErrorHandler()
 
 import logging
 #logging.basicConfig(level="INFO")
@@ -139,6 +142,7 @@ elif args.discretisation == "cg":
 else:
     raise ValueError("please specify hdiv or cg for --discretisation")
 
+PETSc.Sys.Print("Finished FunctionSpaces")
 Z = V * Q
 size = Z.mesh().mpi_comm().size
 PETSc.Sys.Print("dim(Z) = %i (%i per core) " % ( Z.dim(), Z.dim()/size))
@@ -152,6 +156,7 @@ if dim == 3 and args.quad:
     bcs += [DirichletBC(Z.sub(0), Constant((0., 0., 0.)), "top"), DirichletBC(Z.sub(0), Constant((0., 0., 0.)), "bottom")]
 
 
+PETSc.Sys.Print("Created BCs")
 omega = 0.1 #0.4, 0.1
 delta = 200 #10, 200
 mu_min = Constant(dr**-0.5)
@@ -280,7 +285,7 @@ fieldsplit_0_lu = {
     "ksp_type": "preonly",
     "ksp_max_it": 1,
     "pc_type": "lu",
-    "pc_factor_mat_solver_type": "superlu_dist",
+    "pc_factor_mat_solver_type": "mumps",
 }
 
 fieldsplit_0_hypre = {
@@ -307,7 +312,8 @@ mg_levels_solver = {
     "ksp_norm_type": "unpreconditioned",
     "ksp_max_it": 5,
     "pc_type": "python",
-    "pc_python_type": "hexstar.ASMHexStarPC" if (args.dim == 3 and args.quad == True) else "firedrake.ASMStarPC",
+    #"pc_python_type": "hexstar.ASMHexStarPC" if (args.dim == 3 and args.quad == True) else "firedrake.ASMStarPC",
+    "pc_python_type": "hexstar.ASMHexStarPC" if (args.dim == 3 and args.quad == True) else "star.ASMStarPlusPC",
     "pc_star_construct_dim": 0,
     "pc_star_backend": args.asmbackend,
     # "pc_star_sub_pc_asm_sub_mat_type": "seqaij",
@@ -464,6 +470,7 @@ if not case == 3:
             BBCTWBlevel = BBCTWlevel.matMult(BBClevel)
             BBCTWB_dict[level] = BBCTWBlevel
 
+PETSc.Sys.Print("Computed BTWB products")
 
 
 # Solve Stoke's equation
@@ -516,8 +523,8 @@ if args.nonzero_initial_guess:
     z.split()[0].project(Constant((1., 1.)))
     z.split()[1].interpolate(SpatialCoordinate(mesh)[1]-2)
 
+PETSc.Sys.Print("Start solves")
 for i in range(args.itref+1):
-    PETSc.Log.begin()
     problem = LinearVariationalProblem(a, l, z, bcs=bcs)
     solver = LinearVariationalSolver(problem,
                                      solver_parameters=params,
@@ -554,13 +561,14 @@ for i in range(args.itref+1):
     # Write out solution
     solver.Z = Z #for calling performance_info
     solver.solve()
-    performance_info(COMM_WORLD, solver)
+    #performance_info(COMM_WORLD, solver)
     #if case==3 or case==4:
     #    with assemble(action(Fgamma, z), bcs=homogenize(bcs)).dat.vec_ro as v:
     #        PETSc.Sys.Print('Residual with    grad-div', v.norm())
     #    with assemble(action(F, z), bcs=homogenize(bcs)).dat.vec_ro as w:
     #        PETSc.Sys.Print('Residual without grad-div', w.norm())
 
+PETSc.Log.view()
 #File("u.pvd").write(z.split()[0])
 # uncomment lines below to write out the solution. then run with --case 3 first
 # and then with --case 4 after to make sure that the 'manual/triple matrix

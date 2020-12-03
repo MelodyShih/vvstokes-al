@@ -24,10 +24,11 @@ def load_balance(mesh):
         mean_owned_dofs = np.mean(comm.allgather(owned_dofs))
         max_owned_dofs = comm.allreduce(owned_dofs, op=MPI.MAX)
         string = 'cells' if i == 0 else 'vertices'
-        warning(BLUE % ("Load balance %s: %i vs %i vs %i (%.3f, %.3f)" % (
-            string, min_owned_dofs, mean_owned_dofs, max_owned_dofs,
-            max_owned_dofs/mean_owned_dofs, max_owned_dofs/min_owned_dofs
-        )))
+        with np.errstate(divide='ignore'):
+            warning(BLUE % ("Load balance %s: %i vs %i vs %i (%.3f, %.3f)" % (
+                string, min_owned_dofs, mean_owned_dofs, max_owned_dofs,
+                max_owned_dofs/mean_owned_dofs, max_owned_dofs/min_owned_dofs
+            )))
 
 def rebalance(dm, i):
     try:
