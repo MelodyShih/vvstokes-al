@@ -399,40 +399,6 @@ appctx = {"nu_fun": mu_fun, "dxlist": [dx], "nu_exprlist": [mu_expr(mh[-1])], "g
 BBCTWB_dict = {} # These are of type PETSc.Mat
 BBCTW_dict = {} # These are of type PETSc.Mat
 
-for level in range(nref+1):
-    levelmesh = mh[level]
-    Vlevel = FunctionSpace(levelmesh, V.ufl_element())
-    Qlevel = FunctionSpace(levelmesh, Q.ufl_element())
-    Zlevel = Vlevel * Qlevel
-    tmpp = TrialFunction(Qlevel)
-    tmpq = TestFunction(Qlevel)
-    if case in [3, 4]:
-        Wlevel = assemble(Tensor(inner(tmpp, tmpq)*dx).inv, mat_type='aij').petscmat
-    elif case == 5:
-        Wlevel = assemble(Tensor(1.0/mu_expr(levelmesh)*inner(tmpp, tmpq)*\
-                                 dx(degree=deg)).inv, mat_type='aij').petscmat
-    elif case == 6:
-        Wlevel = w*assemble(Tensor(1.0/mu_expr(levelmesh)*inner(tmpp, tmpq)*dx).inv).petscmat + (1-w)*assemble(Tensor(inner(tmpp, tmpq)*dx).inv).petscmat
-    else:
-        raise ValueError("Augmented Jacobian (case %d) not implemented yet" % case)
-
-    tmpu, tmpp = TrialFunctions(Zlevel)
-    tmpv, tmpq = TestFunctions(Zlevel)
-    tmpbcs = [DirichletBC(Zlevel.sub(0), Constant((0.,) * args.dim), "on_boundary")]
-    if args.dim == 3 and args.quad:
-        tmpbcs += [DirichletBC(Zlevel.sub(0), Constant((0., 0., 0.)), "top"), DirichletBC(Zlevel.sub(0), Constant((0., 0., 0.)), "bottom")]
-    BBClevel =  assemble(- tmpq * div(tmpu) * dx(degree=divdegree), bcs=tmpbcs, mat_type='nest').petscmat.getNestSubMatrix(1, 0)
-    Wlevel *= gamma
-    if level in BBCTW_dict:
-        BBCTWlevel = BBClevel.transposeMatMult(Wlevel, result=BBCTW_dict[level])
-    else:
-        BBCTWlevel = BBClevel.transposeMatMult(Wlevel)
-        BBCTW_dict[level] = BBCTWlevel
-    if level in BBCTWB_dict:
-        BBCTWBlevel = BBCTWlevel.matMult(BBClevel, result=BBCTWB_dict[level])
-    else:
-        BBCTWBlevel = BBCTWlevel.matMult(BBClevel)
-        BBCTWB_dict[level] = BBCTWBlevel
 
 if not case == 3:
     for level in range(nref+1):
@@ -459,16 +425,11 @@ if not case == 3:
             tmpbcs += [DirichletBC(Zlevel.sub(0), Constant((0., 0., 0.)), "top"), DirichletBC(Zlevel.sub(0), Constant((0., 0., 0.)), "bottom")]
         BBClevel =  assemble(- tmpq * div(tmpu) * dx(degree=divdegree), bcs=tmpbcs, mat_type='nest').petscmat.getNestSubMatrix(1, 0)
         Wlevel *= gamma
-        if level in BBCTW_dict:
-            BBCTWlevel = BBClevel.transposeMatMult(Wlevel, result=BBCTW_dict[level])
-        else:
-            BBCTWlevel = BBClevel.transposeMatMult(Wlevel)
-            BBCTW_dict[level] = BBCTWlevel
+        #todo: fill BBC_dict and W_dict and to the right thin in modify_residual
         if level in BBCTWB_dict:
-            BBCTWBlevel = BBCTWlevel.matMult(BBClevel, result=BBCTWB_dict[level])
+            BBCTWBlevel = Wlevel.PtAP(BBClevel, result=BBCTWB_dict[level])
         else:
-            BBCTWBlevel = BBCTWlevel.matMult(BBClevel)
-            BBCTWB_dict[level] = BBCTWBlevel
+            BBCTWB_dict[level] = Wlevel.PtAP(BBClevel)
 
 PETSc.Sys.Print("Computed BTWB products")
 
