@@ -421,7 +421,7 @@ for level in range(nref+1):
     tmpbcs = [DirichletBC(Zlevel.sub(0), Constant((0.,) * args.dim), "on_boundary")]
     if args.dim == 3 and args.quad:
         tmpbcs += [DirichletBC(Zlevel.sub(0), Constant((0., 0., 0.)), "top"), DirichletBC(Zlevel.sub(0), Constant((0., 0., 0.)), "bottom")]
-    BBClevel =  assemble(- tmpq * div(tmpu) * dx(degree=divdegree), bcs=tmpbcs, mat_type='nest').petscmat.getNestSubMatrix(1, 0)
+    BBClevel =  assemble(inner(tmpv, tmpu) * dx - tmpp*div(tmpv)*dx - tmpq * div(tmpu) * dx(degree=divdegree), bcs=tmpbcs, mat_type='nest').petscmat.getNestSubMatrix(1, 0)
     Wlevel *= gamma
     if level in BBCTW_dict:
         BBCTWlevel = BBClevel.transposeMatMult(Wlevel, result=BBCTW_dict[level])
