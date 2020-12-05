@@ -148,6 +148,10 @@ size = Z.mesh().mpi_comm().size
 PETSc.Sys.Print("dim(Z) = %i (%i per core) " % ( Z.dim(), Z.dim()/size))
 PETSc.Sys.Print("dim(V) = %i (%i per core) " % ( V.dim(), V.dim()/size))
 PETSc.Sys.Print("dim(Q) = %i (%i per core) " % ( Q.dim(), Q.dim()/size))
+PETSc.Sys.Print("Start sparsity")
+from sparsity import cache_sparsity
+cache_sparsity(Z, V, Q)
+PETSc.Sys.Print("Finished sparsity")
 z = Function(Z)
 u, p = TrialFunctions(Z)
 v, q = TestFunctions(Z)
