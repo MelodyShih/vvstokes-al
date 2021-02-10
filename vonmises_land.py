@@ -100,9 +100,9 @@ vvstokesprob = VariableViscosityStokesProblem(2, # dimension of the problem
                                     quaddegree=deg, #quadrature degree
                                     quaddivdegree=divdegree) # qaudrature divdeg                      
 if quad:
-    basemesh = Mesh('land_quad.msh')
+    basemesh = Mesh('mesh/land_quad.msh')
 else:
-    basemesh = Mesh('land.msh')
+    basemesh = Mesh('mesh/land.msh')
 vvstokesprob.set_meshhierarchy(basemesh, nref)
 
 mesh = vvstokesprob.get_mesh()
