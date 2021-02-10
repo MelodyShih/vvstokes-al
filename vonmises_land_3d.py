@@ -39,6 +39,7 @@ parser.add_argument("--gamma", type=float, default=1e4)
 parser.add_argument("--itref", type=int, default=0)
 parser.add_argument("--case", type=int, default=3)
 parser.add_argument("--discretisation", type=str, default="hdiv")
+parser.add_argument("--quad", dest="quad", default=False, action="store_true")
 parser.add_argument("--quad-deg", type=int, dest="quad_deg", default=20)
 parser.add_argument("--rebalance", dest="rebalance", default=False, action="store_true")
 parser.add_argument("--asmbackend", type=str, choices=['tinyasm', 'petscasm'], 
@@ -52,6 +53,7 @@ case = args.case
 gamma = Constant(args.gamma)
 deg = args.quad_deg
 divdegree = None
+quad = args.quad
 
 #======================================
 # Parameters
@@ -73,8 +75,8 @@ REF_STRAIN_RATE = REF_VELOCITY*YEAR_PER_SEC/REF_HEIGHT
 REF_STRESS_RATE = 2.0*REF_STRAIN_RATE*REF_VISCOSITY
 
 VISC_UPPER_SCALED   = 1.e24/REF_VISCOSITY
-VISC_MIDDLE_SCALED  = 1.e20/REF_VISCOSITY
-VISC_LOWER_SCALED   = 1.e17/REF_VISCOSITY
+VISC_MIDDLE_SCALED  = 1.e21/REF_VISCOSITY
+VISC_LOWER_SCALED   = 1.e18/REF_VISCOSITY
 BOUNDARY_INFLOW_VELOCITY = 1.0
 
 # nolinear solver parameters
@@ -92,19 +94,33 @@ OUTPUT_VTK=True
 # Setup VariableViscosityStokesProblem
 #======================================
 vvstokesprob = VariableViscosityStokesProblem(3, # dimension of the problem 
-                                    False, #triangular mesh
+                                    quad, #quad/triangular mesh
                                     args.discretisation, # finite elems spaces
                                     k, # order of discretisation
                                     quaddegree=deg, #quadrature degree
                                     quaddivdegree=divdegree) # qaudrature divdeg                      
-basemesh = Mesh('land_3d.msh')
-vvstokesprob.set_meshhierarchy(basemesh, nref)
+#basemesh = Mesh('land_3d.msh')
 
-mesh = vvstokesprob.get_mesh()
-dx_upper  = Measure("dx", domain=mesh, subdomain_id=7)
-dx_middle = Measure("dx", domain=mesh, subdomain_id=8)
-dx_lower  = Measure("dx", domain=mesh, subdomain_id=6)
-dx = Measure("dx", domain=mesh, subdomain_id="everywhere")
+if quad:
+    basemesh = Mesh('land.msh')
+    vvstokesprob.Lz = 1.0
+    vvstokesprob.Nz = 15
+    vvstokesprob.set_meshhierarchy(basemesh, nref)
+
+    mesh = vvstokesprob.get_mesh()
+    dx_upper  = Measure("dx", domain=mesh, subdomain_id=2)
+    dx_middle = Measure("dx", domain=mesh, subdomain_id=3)
+    dx_lower  = Measure("dx", domain=mesh, subdomain_id=1)
+    dx = Measure("dx", domain=mesh, subdomain_id="everywhere")
+else:
+    basemesh = Mesh('land_3d.msh')
+    vvstokesprob.set_meshhierarchy(basemesh, nref)
+    
+    mesh = vvstokesprob.get_mesh()
+    dx_upper  = Measure("dx", domain=mesh, subdomain_id=7)
+    dx_middle = Measure("dx", domain=mesh, subdomain_id=8)
+    dx_lower  = Measure("dx", domain=mesh, subdomain_id=6)
+    dx = Measure("dx", domain=mesh, subdomain_id="everywhere")
 #vvstokesprob.set_measurelist([dx_upper, dx_lower])
 vvstokesprob.set_measurelist([dx])
 
@@ -146,11 +162,18 @@ def bc_fun(mesh):
     VQ = V*Q
 
     # construct boundary conditions
-    bc_wall_z1   = DirichletBC(VQ.sub(0).sub(2), 0.0, sub_domain=3) 
-    bc_wall_z2   = DirichletBC(VQ.sub(0).sub(2), 0.0, sub_domain=4) 
-    bc_wall_y    = DirichletBC(VQ.sub(0).sub(1), 0.0, sub_domain=5) 
-    bc_left      = DirichletBC(VQ.sub(0), vel_inflow_left , sub_domain=2)
-    bc_right     = DirichletBC(VQ.sub(0), vel_inflow_right, sub_domain=1)
+    if quad:
+        bc_wall_z1   = DirichletBC(VQ.sub(0).sub(2), 0.0, "top") 
+        bc_wall_z2   = DirichletBC(VQ.sub(0).sub(2), 0.0, "bottom") 
+        bc_wall_y    = DirichletBC(VQ.sub(0).sub(1), 0.0, sub_domain=6) 
+        bc_left      = DirichletBC(VQ.sub(0), vel_inflow_left , sub_domain=4)
+        bc_right     = DirichletBC(VQ.sub(0), vel_inflow_right, sub_domain=5)
+    else:
+        bc_wall_z1   = DirichletBC(VQ.sub(0).sub(2), 0.0, sub_domain=3) 
+        bc_wall_z2   = DirichletBC(VQ.sub(0).sub(2), 0.0, sub_domain=4) 
+        bc_wall_y    = DirichletBC(VQ.sub(0).sub(1), 0.0, sub_domain=5) 
+        bc_left      = DirichletBC(VQ.sub(0), vel_inflow_left , sub_domain=2)
+        bc_right     = DirichletBC(VQ.sub(0), vel_inflow_right, sub_domain=1)
     #bc_outflow  = DirichletBC(VQ.sub(1), 0.0       , sub_domain=4)
     bcs = [bc_left, bc_right, bc_wall_z1, bc_wall_z2, bc_wall_y]
     return bcs
@@ -160,11 +183,18 @@ def bcstep_fun(mesh):
     VQ = V*Q
 
     # construct homogeneous Dirichlet BC's at inflow boundary for Newton steps
-    bc_wall_z1    = DirichletBC(VQ.sub(0).sub(2), 0.0, sub_domain=3) 
-    bc_wall_z2    = DirichletBC(VQ.sub(0).sub(2), 0.0, sub_domain=4) 
-    bc_wall_y     = DirichletBC(VQ.sub(0).sub(1), 0.0, sub_domain=5) 
-    bc_step_left  = DirichletBC(VQ.sub(0), vel_noslip, sub_domain=2)
-    bc_step_right = DirichletBC(VQ.sub(0), vel_noslip, sub_domain=1)
+    if quad:
+        bc_wall_z1   = DirichletBC(VQ.sub(0).sub(2), 0.0, "top") 
+        bc_wall_z2   = DirichletBC(VQ.sub(0).sub(2), 0.0, "bottom") 
+        bc_wall_y    = DirichletBC(VQ.sub(0).sub(1), 0.0, sub_domain=6) 
+        bc_left      = DirichletBC(VQ.sub(0), vel_noslip , sub_domain=4)
+        bc_right     = DirichletBC(VQ.sub(0), vel_noslip, sub_domain=5)
+    else:
+        bc_wall_z1    = DirichletBC(VQ.sub(0).sub(2), 0.0, sub_domain=3) 
+        bc_wall_z2    = DirichletBC(VQ.sub(0).sub(2), 0.0, sub_domain=4) 
+        bc_wall_y     = DirichletBC(VQ.sub(0).sub(1), 0.0, sub_domain=5) 
+        bc_step_left  = DirichletBC(VQ.sub(0), vel_noslip, sub_domain=2)
+        bc_step_right = DirichletBC(VQ.sub(0), vel_noslip, sub_domain=1)
     bcs_step = [bc_step_left, bc_step_right, bc_wall_z1, bc_wall_z2, bc_wall_y]
     return bcs_step
 
@@ -297,10 +327,7 @@ step_length  = 0.0
 
 # assemble mass matrices
 if args.linearization == 'stressvel':
-    u = TrialFunction(Vd)
-    v = TestFunction(Vd)
-    Mdinv = assemble(Tensor(inner(u, v)*dx).inv).petscmat
-    #Md = assemble(Abstract.WeakForm_Phi.mass(Vd))
+    Md = assemble(Abstract.WeakForm_Phi.mass(Vd))
 
 if MONITOR_NL_ITER:
     PETSc.Sys.Print('{0:<3} "{1:>6}"{2:^20}{3:^14}{4:^15}{5:^10}'.format(
@@ -336,9 +363,8 @@ for itn in range(NL_SOLVER_MAXITER+1):
             # project S to unit sphere
             Sprojweak = WeakForm.hessian_dualUpdate_boundMaxMagnitude(S, Vd, 1.0)
             b = assemble(Sprojweak)
-            Mdinv.mult(b.vector(), S_proj.vector()) 
-            #solve(Md, S_proj.vector(), b, 
-            #      solver_parameters={"ksp_monitor_true_residual": None, "ksp_view": None})
+            solve(Md, S_proj.vector(), b, 
+                  solver_parameters={"ksp_monitor_true_residual": None, "ksp_view": None})
 
     # assemble linearized system
     vvstokesprob.set_bcsfun(bcstep_fun)
@@ -372,10 +398,9 @@ for itn in range(NL_SOLVER_MAXITER+1):
     # solve dual variable step
     if args.linearization == 'stressvel':
         Abstract.Vector.scale(step, -1.0)
-        b = assemble(dualStep).petscmat
-        Mdinv.mult(b.vector(), S_step.vector()) 
-        #solve(Md, S_step.vector(), b, solver_parameters={"ksp_monitor_true_residual": None, 
-        #                                                 "ksp_type": "fgmres"})
+        b = assemble(dualStep)
+        solve(Md, S_step.vector(), b, solver_parameters={"ksp_monitor_true_residual": None, 
+                                                         "ksp_type": "fgmres"})
         Abstract.Vector.scale(step, -1.0)
 
     # compute the norm of the gradient
@@ -444,7 +469,7 @@ if OUTPUT_VTK:
     solve((inner(edotp_t, (edotp - visceff))*dx_upper+ \
            inner(edotp_t, (edotp - visc_lower))*dx_lower+ \
            inner(edotp_t, (edotp - visc_middle))*dx_middle) == 0.0, edotp)
-    File("/scratch1/04841/tg841407/stokes_2020-11-21/vtk/land3d_large_visceff.pvd").write(edotp)
+    File("/scratch1/04841/tg841407/stokes_2020-11-23/vtk/land3d_large_visceff.pvd").write(edotp)
 
-    File("/scratch1/04841/tg841407/stokes_2020-11-21/vtk/land3d_large_solution_u.pvd").write(sol_u)
-    File("/scratch1/04841/tg841407/stokes_2020-11-21/vtk/land3d_large_solution_p.pvd").write(sol_p)
+    File("/scratch1/04841/tg841407/stokes_2020-11-23/vtk/land3d_large_solution_u.pvd").write(sol_u)
+    File("/scratch1/04841/tg841407/stokes_2020-11-23/vtk/land3d_large_solution_p.pvd").write(sol_p)

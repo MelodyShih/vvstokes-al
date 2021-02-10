@@ -142,9 +142,10 @@ class VariableViscosityStokesProblem():
                     elt = VectorElement(TensorProductElement(horiz_elt, vert_elt))
                     V = FunctionSpace(mesh, elt)
                     Q = FunctionSpace(mesh, "DPC", k-1)
-
-                    Vd = None
                     # Q = FunctionSpace(mesh, "DQ", k-2)
+
+                    Vd_e = TensorElement('DG', mesh.ufl_cell(), k)
+                    Vd = FunctionSpace(mesh, Vd_e)
                 else:
                     Pk = FiniteElement("Lagrange", mesh.ufl_cell(), k)
                     if k < 3:
