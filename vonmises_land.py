@@ -39,6 +39,7 @@ parser.add_argument("--gamma", type=float, default=1e4)
 parser.add_argument("--itref", type=int, default=0)
 parser.add_argument("--case", type=int, default=3)
 parser.add_argument("--discretisation", type=str, default="hdiv")
+parser.add_argument("--quad", dest="quad", default=False, action="store_true")
 parser.add_argument("--quad-deg", type=int, dest="quad_deg", default=20)
 parser.add_argument("--rebalance", dest="rebalance", default=False, action="store_true")
 parser.add_argument("--asmbackend", type=str, choices=['tinyasm', 'petscasm'], 
@@ -52,6 +53,7 @@ case = args.case
 gamma = Constant(args.gamma)
 deg = args.quad_deg
 divdegree = None
+quad = args.quad
 
 #======================================
 # Parameters
@@ -92,12 +94,15 @@ OUTPUT_VTK=True
 # Setup VariableViscosityStokesProblem
 #======================================
 vvstokesprob = VariableViscosityStokesProblem(2, # dimension of the problem 
-                                    False, #triangular mesh
+                                    quad, #triangular mesh
                                     args.discretisation, # finite elems spaces
                                     k, # order of discretisation
                                     quaddegree=deg, #quadrature degree
                                     quaddivdegree=divdegree) # qaudrature divdeg                      
-basemesh = Mesh('land.msh')
+if quad:
+    basemesh = Mesh('land_quad.msh')
+else:
+    basemesh = Mesh('land.msh')
 vvstokesprob.set_meshhierarchy(basemesh, nref)
 
 mesh = vvstokesprob.get_mesh()
@@ -274,27 +279,27 @@ if args.linearization == 'stressvel':
     Md = assemble(Abstract.WeakForm_Phi.mass(Vd))
 
 if MONITOR_NL_ITER:
-    print('{0:<3} "{1:>6}"{2:^20}{3:^14}{4:^15}{5:^10}'.format(
+    PETSc.Sys.Print('{0:<3} "{1:>6}"{2:^20}{3:^14}{4:^15}{5:^10}'.format(
           "Itn", vvstokessolver.solver_type, "Energy", "||g||_l2", 
            "(grad,step)", "step len"))
 
 for itn in range(NL_SOLVER_MAXITER+1):
     # print iteration line
     if MONITOR_NL_ITER:
-        print("{0:>3d} {1:>6d}{2:>20.12e}{3:>14.6e}{4:>+15.6e}{5:>10f}".format(
+        PETSc.Sys.Print("{0:>3d} {1:>6d}{2:>20.12e}{3:>14.6e}{4:>+15.6e}{5:>10f}".format(
               itn, lin_it, obj_val, g_norm, angle_grad_step, step_length))
 
     # stop if converged
     if g_norm < NL_SOLVER_GRAD_RTOL*g_norm_init:
-        print("Stop reason: Converged to rtol; ||g|| reduction %3e." % g_norm/g_norm_init)
+        PETSc.Sys.Print("Stop reason: Converged to rtol; ||g|| reduction %3e." % g_norm/g_norm_init)
         break
     if np.abs(angle_grad_step) < NL_SOLVER_GRAD_STEP_RTOL*np.abs(angle_grad_step_init):
-        print("Stop reason: Converged to rtol; (grad,step) reduction %3e." % \
+        PETSc.Sys.Print("Stop reason: Converged to rtol; (grad,step) reduction %3e." % \
               np.abs(angle_grad_step/angle_grad_step_init))
         break
     # stop if step search failed
     if 0 < itn and not step_success:
-        print("Stop reason: Step search reached maximum number of backtracking.")
+        PETSc.Sys.Print("Stop reason: Step search reached maximum number of backtracking.")
         break
 
     # set up the linearized system
@@ -363,7 +368,7 @@ for itn in range(NL_SOLVER_MAXITER+1):
         sol.vector().axpy(-step_length, step.vector())
         obj_val_next = assemble(obj)
         if MONITOR_NL_STEPSEARCH and 0 < j:
-           print("Step search: {0:>2d}{1:>10f}{2:>20.12e}{3:>20.12e}".format(
+           PETSc.Sys.Print("Step search: {0:>2d}{1:>10f}{2:>20.12e}{3:>20.12e}".format(
                  j, step_length, obj_val_next, obj_val))
         if obj_val_next < obj_val + step_length*NL_SOLVER_STEP_ARMIJO*angle_grad_step:
             if args.linearization == 'stressvel':
@@ -377,7 +382,7 @@ for itn in range(NL_SOLVER_MAXITER+1):
         sol.assign(sol_prev)
     Abstract.Vector.scale(step, -step_length)
 
-print("%s: #iter %i, ||g|| reduction %3e, (grad,step) reduction %3e, #total linear iter %i." % \
+PETSc.Sys.Print("%s: #iter %i, ||g|| reduction %3e, (grad,step) reduction %3e, #total linear iter %i." % \
     (
         args.linearization,
         itn,

@@ -14,6 +14,8 @@ from alfi import *
 from firedrake.mg.utils import get_level
 from balance import load_balance, rebalance
 
+import star
+
 import numpy as np
 
 class VariableViscosityStokesProblem():
@@ -140,6 +142,7 @@ class VariableViscosityStokesProblem():
                     elt = VectorElement(TensorProductElement(horiz_elt, vert_elt))
                     V = FunctionSpace(mesh, elt)
                     Q = FunctionSpace(mesh, "DPC", k-1)
+
                     Vd = None
                     # Q = FunctionSpace(mesh, "DQ", k-2)
                 else:
@@ -488,8 +491,10 @@ class VariableViscosityStokesSolver():
                 "ksp_norm_type": "unpreconditioned",
                 "ksp_max_it": 5,
                 "pc_type": "python",
+                #"pc_python_type": "hexstar.ASMHexStarPC" if (dim==3 and quad==True) 
+                #                                        else "firedrake.ASMStarPC",
                 "pc_python_type": "hexstar.ASMHexStarPC" if (dim==3 and quad==True) 
-                                                        else "firedrake.ASMStarPC",
+                                                        else "star.ASMStarPC",
                 "pc_star_construct_dim": 0,
                 "pc_star_backend": asmbackend,
                 # "pc_star_sub_pc_asm_sub_mat_type": "seqaij",
@@ -524,7 +529,7 @@ class VariableViscosityStokesSolver():
                 "ksp_gmres_restart": 200,
                 "ksp_rtol": 1.0e-6,
                 "ksp_atol": 1.0e-10,
-                "ksp_max_it": 200,
+                "ksp_max_it": 300,
                 #"ksp_view": None,
                 "ksp_monitor_true_residual": None,
                 "ksp_converged_reason": None,
