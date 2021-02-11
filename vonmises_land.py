@@ -100,15 +100,19 @@ vvstokesprob = VariableViscosityStokesProblem(2, # dimension of the problem
                                     quaddegree=deg, #quadrature degree
                                     quaddivdegree=divdegree) # qaudrature divdeg                      
 if quad:
-    basemesh = Mesh('mesh/land_quad.msh')
+    basemesh = Mesh('mesh/land_quad_simple.msh')
+    #basemesh = Mesh('mesh/land_quad.msh')
 else:
     basemesh = Mesh('mesh/land.msh')
 vvstokesprob.set_meshhierarchy(basemesh, nref)
 
 mesh = vvstokesprob.get_mesh()
-dx_upper  = Measure("dx", domain=mesh, subdomain_id=2)
-dx_middle = Measure("dx", domain=mesh, subdomain_id=3)
-dx_lower  = Measure("dx", domain=mesh, subdomain_id=1)
+#dx_upper  = Measure("dx", domain=mesh, subdomain_id=2)
+#dx_middle = Measure("dx", domain=mesh, subdomain_id=3)
+#dx_lower  = Measure("dx", domain=mesh, subdomain_id=1)
+dx_upper  = Measure("dx", domain=mesh, subdomain_id=6)
+dx_middle = Measure("dx", domain=mesh, subdomain_id=5)
+dx_lower  = Measure("dx", domain=mesh, subdomain_id=7)
 dx = Measure("dx", domain=mesh, subdomain_id="everywhere")
 #vvstokesprob.set_measurelist([dx_upper, dx_lower])
 vvstokesprob.set_measurelist([dx])
@@ -129,9 +133,12 @@ def bc_fun(mesh):
     VQ = V*Q
 
     # construct boundary conditions
-    bc_walls    = DirichletBC(VQ.sub(0).sub(1), 0.0, sub_domain=6)
-    bc_left     = DirichletBC(VQ.sub(0), vel_inflow, sub_domain=4)
-    bc_right    = DirichletBC(VQ.sub(0),-vel_inflow, sub_domain=5)
+    bc_walls    = DirichletBC(VQ.sub(0).sub(1), 0.0, sub_domain=4)
+    bc_left     = DirichletBC(VQ.sub(0), vel_inflow, sub_domain=2)
+    bc_right    = DirichletBC(VQ.sub(0),-vel_inflow, sub_domain=3)
+    #bc_walls    = DirichletBC(VQ.sub(0).sub(1), 0.0, sub_domain=6)
+    #bc_left     = DirichletBC(VQ.sub(0), vel_inflow, sub_domain=4)
+    #bc_right    = DirichletBC(VQ.sub(0),-vel_inflow, sub_domain=5)
     #bc_outflow  = DirichletBC(VQ.sub(1), 0.0       , sub_domain=4)
     bcs = [bc_left, bc_right, bc_walls]
     return bcs
@@ -141,9 +148,12 @@ def bcstep_fun(mesh):
     VQ = V*Q
 
     # construct homogeneous Dirichlet BC's at inflow boundary for Newton steps
-    bc_walls      = DirichletBC(VQ.sub(0).sub(1), 0.0, sub_domain=6)
-    bc_step_left  = DirichletBC(VQ.sub(0), vel_noslip, sub_domain=4)
-    bc_step_right = DirichletBC(VQ.sub(0), vel_noslip, sub_domain=5)
+    bc_walls      = DirichletBC(VQ.sub(0).sub(1), 0.0, sub_domain=4)
+    bc_step_left  = DirichletBC(VQ.sub(0), vel_noslip, sub_domain=2)
+    bc_step_right = DirichletBC(VQ.sub(0), vel_noslip, sub_domain=3)
+    #bc_walls      = DirichletBC(VQ.sub(0).sub(1), 0.0, sub_domain=6)
+    #bc_step_left  = DirichletBC(VQ.sub(0), vel_noslip, sub_domain=4)
+    #bc_step_right = DirichletBC(VQ.sub(0), vel_noslip, sub_domain=5)
     bcs_step = [bc_step_left, bc_step_right, bc_walls]
     return bcs_step
 
