@@ -104,7 +104,7 @@ vvstokesprob = VariableViscosityStokesProblem(3, # dimension of the problem
 if quad:
     basemesh = Mesh('mesh/land_quad.msh')
     vvstokesprob.Lz = 1.0
-    vvstokesprob.Nz = 5
+    vvstokesprob.Nz = 4
     vvstokesprob.set_meshhierarchy(basemesh, nref)
 
     mesh = vvstokesprob.get_mesh()
@@ -136,32 +136,36 @@ VQ = V*Q
 vel_noslip = Constant((0.0, 0.0, 0.0))
 vel_inflow = Constant((BOUNDARY_INFLOW_VELOCITY, 0.0, 0.0))
 
-class LeftInflowExpression(Expression):
-    def eval(self, value, x):
-        c = 0.2
-        value[0] = (x[2]+1)*BOUNDARY_INFLOW_VELOCITY
-        value[1] = 0.0
-        value[2] = 0.0
+#class LeftInflowExpression(Expression):
+#    def eval(self, value, x):
+#        c = 0.2
+#        value[0] = (x[2]+1)*BOUNDARY_INFLOW_VELOCITY
+#        value[1] = 0.0
+#        value[2] = 0.0
+#
+#    def value_shape(self):
+#        return (3,)
+#
+#class RightInflowExpression(Expression):
+#    def eval(self, value, x):
+#        c = 0.2
+#        value[0] = -(x[2]+1)*BOUNDARY_INFLOW_VELOCITY
+#        value[1] = 0.0
+#        value[2] = 0.0
+#
+#    def value_shape(self):
+#        return (3,)
+#vel_inflow_left  = LeftInflowExpression()
+#vel_inflow_right = RightInflowExpression()
 
-    def value_shape(self):
-        return (3,)
-
-class RightInflowExpression(Expression):
-    def eval(self, value, x):
-        c = 0.2
-        value[0] = -(x[2]+1)*BOUNDARY_INFLOW_VELOCITY
-        value[1] = 0.0
-        value[2] = 0.0
-
-    def value_shape(self):
-        return (3,)
-vel_inflow_left  = LeftInflowExpression()
-vel_inflow_right = RightInflowExpression()
 
 def bc_fun(mesh):
     V, Q = vvstokesprob.get_functionspace(mesh)
     VQ = V*Q
 
+    x = SpatialCoordinate(mesh)
+    vel_inflow_left  = ( (x[2]+1)*BOUNDARY_INFLOW_VELOCITY, 0.0, 0.0)
+    vel_inflow_right = (-(x[2]+1)*BOUNDARY_INFLOW_VELOCITY, 0.0, 0.0)
     # construct boundary conditions
     if quad:
         bc_wall_z1   = DirichletBC(VQ.sub(0).sub(2), 0.0, "top") 
@@ -185,11 +189,11 @@ def bcstep_fun(mesh):
 
     # construct homogeneous Dirichlet BC's at inflow boundary for Newton steps
     if quad:
-        bc_wall_z1   = DirichletBC(VQ.sub(0).sub(2), 0.0, "top") 
-        bc_wall_z2   = DirichletBC(VQ.sub(0).sub(2), 0.0, "bottom") 
-        bc_wall_y    = DirichletBC(VQ.sub(0).sub(1), 0.0, sub_domain=6) 
-        bc_left      = DirichletBC(VQ.sub(0), vel_noslip, sub_domain=4)
-        bc_right     = DirichletBC(VQ.sub(0), vel_noslip, sub_domain=5)
+        bc_wall_z1    = DirichletBC(VQ.sub(0).sub(2), 0.0, "top")
+        bc_wall_z2    = DirichletBC(VQ.sub(0).sub(2), 0.0, "bottom")
+        bc_wall_y     = DirichletBC(VQ.sub(0).sub(1), 0.0, sub_domain=6) 
+        bc_step_left  = DirichletBC(VQ.sub(0), vel_noslip, sub_domain=4)
+        bc_step_right = DirichletBC(VQ.sub(0), vel_noslip, sub_domain=5)
     else:
         bc_wall_z1    = DirichletBC(VQ.sub(0).sub(2), 0.0, sub_domain=3) 
         bc_wall_z2    = DirichletBC(VQ.sub(0).sub(2), 0.0, sub_domain=4) 
