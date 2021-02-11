@@ -102,9 +102,9 @@ vvstokesprob = VariableViscosityStokesProblem(3, # dimension of the problem
 #basemesh = Mesh('land_3d.msh')
 
 if quad:
-    basemesh = Mesh('land.msh')
+    basemesh = Mesh('mesh/land_quad.msh')
     vvstokesprob.Lz = 1.0
-    vvstokesprob.Nz = 15
+    vvstokesprob.Nz = 5
     vvstokesprob.set_meshhierarchy(basemesh, nref)
 
     mesh = vvstokesprob.get_mesh()
@@ -113,7 +113,7 @@ if quad:
     dx_lower  = Measure("dx", domain=mesh, subdomain_id=1)
     dx = Measure("dx", domain=mesh, subdomain_id="everywhere")
 else:
-    basemesh = Mesh('land_3d.msh')
+    basemesh = Mesh('mesh/land_3d.msh')
     vvstokesprob.set_meshhierarchy(basemesh, nref)
     
     mesh = vvstokesprob.get_mesh()
@@ -128,6 +128,7 @@ vvstokesprob.set_measurelist([dx])
 # Setup boundary condition
 #--------------------------------------
 mesh = vvstokesprob.get_mesh()
+PETSc.Sys.Print(mesh.topological.exterior_facets.unique_markers)
 V, Q, Vd = vvstokesprob.get_functionspace(mesh,info=True, dualFncSp=True)
 VQ = V*Q
 
@@ -187,7 +188,7 @@ def bcstep_fun(mesh):
         bc_wall_z1   = DirichletBC(VQ.sub(0).sub(2), 0.0, "top") 
         bc_wall_z2   = DirichletBC(VQ.sub(0).sub(2), 0.0, "bottom") 
         bc_wall_y    = DirichletBC(VQ.sub(0).sub(1), 0.0, sub_domain=6) 
-        bc_left      = DirichletBC(VQ.sub(0), vel_noslip , sub_domain=4)
+        bc_left      = DirichletBC(VQ.sub(0), vel_noslip, sub_domain=4)
         bc_right     = DirichletBC(VQ.sub(0), vel_noslip, sub_domain=5)
     else:
         bc_wall_z1    = DirichletBC(VQ.sub(0).sub(2), 0.0, sub_domain=3) 
