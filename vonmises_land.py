@@ -248,16 +248,16 @@ else:
 (a,l) = WeakForm.linear_stokes(rhs, VQ, visc_upper, dx, dx_upper,
                                visc_lower, dx_lower, visc_middle, dx_middle)
 
-vvstokesprob.set_linearvariationalproblem(a, l, sol, bcs)
-vvstokessolver = VariableViscosityStokesSolver(vvstokesprob, 
-                                               args.solver_type, 
-                                               args.case,
-                                               args.gamma,
-                                               args.asmbackend)
-vvstokessolver.set_linearvariationalsolver()
-vvstokessolver.set_transfers()
-
 for i in range(args.itref+1):
+    #TODO: why have to set it everytime?
+    vvstokesprob.set_linearvariationalproblem(a, l, sol, bcs)
+    vvstokessolver = VariableViscosityStokesSolver(vvstokesprob, 
+                                                   args.solver_type, 
+                                                   args.case,
+                                                   args.gamma,
+                                                   args.asmbackend)
+    vvstokessolver.set_linearvariationalsolver()
+    vvstokessolver.set_transfers()
     vvstokessolver.solve()
 
 ## uncomment to compare solutions between augmented/unaugmented sys
