@@ -144,7 +144,7 @@ class VariableViscosityStokesProblem():
                     Q = FunctionSpace(mesh, "DPC", k-1)
                     # Q = FunctionSpace(mesh, "DQ", k-2)
 
-                    Vd_e = TensorElement('DG', mesh.ufl_cell(), k)
+                    Vd_e = TensorElement('DQ', mesh.ufl_cell(), k)
                     Vd = FunctionSpace(mesh, Vd_e)
                 else:
                     Pk = FiniteElement("Lagrange", mesh.ufl_cell(), k)
@@ -376,12 +376,16 @@ class VariableViscosityStokesSolver():
             else:
                 BBCTWlevel = BBClevel.transposeMatMult(Wlevel)
                 BBCTW_dict[level] = BBCTWlevel
+            #if level in BBCTWB_dict:
+            #    BBCTWBlevel = BBCTWlevel.matMult(BBClevel, 
+            #                                     result=BBCTWB_dict[level])
+            #else:
+            #    BBCTWBlevel = BBCTWlevel.matMult(BBClevel)
+            #    BBCTWB_dict[level] = BBCTWBlevel
             if level in BBCTWB_dict:
-                BBCTWBlevel = BBCTWlevel.matMult(BBClevel, 
-                                                 result=BBCTWB_dict[level])
+                BBCTWBlevel = Wlevel.PtAP(BBClevel, result=BBCTWB_dict[level])
             else:
-                BBCTWBlevel = BBCTWlevel.matMult(BBClevel)
-                BBCTWB_dict[level] = BBCTWBlevel
+                BBCTWB_dict[level] = Wlevel.PtAP(BBClevel)
 
         self.BBCTWB_dict = BBCTWB_dict
         self.BBCTW_dict = BBCTW_dict 
