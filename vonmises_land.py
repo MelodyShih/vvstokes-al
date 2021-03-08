@@ -107,12 +107,15 @@ else:
 vvstokesprob.set_meshhierarchy(basemesh, nref)
 
 mesh = vvstokesprob.get_mesh()
-#dx_upper  = Measure("dx", domain=mesh, subdomain_id=2)
-#dx_middle = Measure("dx", domain=mesh, subdomain_id=3)
-#dx_lower  = Measure("dx", domain=mesh, subdomain_id=1)
-dx_upper  = Measure("dx", domain=mesh, subdomain_id=6)
-dx_middle = Measure("dx", domain=mesh, subdomain_id=5)
-dx_lower  = Measure("dx", domain=mesh, subdomain_id=7)
+if quad:
+    dx_upper  = Measure("dx", domain=mesh, subdomain_id=6)
+    dx_middle = Measure("dx", domain=mesh, subdomain_id=5)
+    dx_lower  = Measure("dx", domain=mesh, subdomain_id=7)
+else:
+    dx_upper  = Measure("dx", domain=mesh, subdomain_id=2)
+    dx_middle = Measure("dx", domain=mesh, subdomain_id=3)
+    dx_lower  = Measure("dx", domain=mesh, subdomain_id=1)
+
 dx = Measure("dx", domain=mesh, subdomain_id="everywhere")
 #vvstokesprob.set_measurelist([dx_upper, dx_lower])
 vvstokesprob.set_measurelist([dx])
@@ -133,12 +136,14 @@ def bc_fun(mesh):
     VQ = V*Q
 
     # construct boundary conditions
-    bc_walls    = DirichletBC(VQ.sub(0).sub(1), 0.0, sub_domain=4)
-    bc_left     = DirichletBC(VQ.sub(0), vel_inflow, sub_domain=2)
-    bc_right    = DirichletBC(VQ.sub(0),-vel_inflow, sub_domain=3)
-    #bc_walls    = DirichletBC(VQ.sub(0).sub(1), 0.0, sub_domain=6)
-    #bc_left     = DirichletBC(VQ.sub(0), vel_inflow, sub_domain=4)
-    #bc_right    = DirichletBC(VQ.sub(0),-vel_inflow, sub_domain=5)
+    if quad:
+        bc_walls    = DirichletBC(VQ.sub(0).sub(1), 0.0, sub_domain=4)
+        bc_left     = DirichletBC(VQ.sub(0), vel_inflow, sub_domain=2)
+        bc_right    = DirichletBC(VQ.sub(0),-vel_inflow, sub_domain=3)
+    else:
+        bc_walls    = DirichletBC(VQ.sub(0).sub(1), 0.0, sub_domain=6)
+        bc_left     = DirichletBC(VQ.sub(0), vel_inflow, sub_domain=4)
+        bc_right    = DirichletBC(VQ.sub(0),-vel_inflow, sub_domain=5)
     #bc_outflow  = DirichletBC(VQ.sub(1), 0.0       , sub_domain=4)
     bcs = [bc_left, bc_right, bc_walls]
     return bcs
@@ -148,12 +153,14 @@ def bcstep_fun(mesh):
     VQ = V*Q
 
     # construct homogeneous Dirichlet BC's at inflow boundary for Newton steps
-    bc_walls      = DirichletBC(VQ.sub(0).sub(1), 0.0, sub_domain=4)
-    bc_step_left  = DirichletBC(VQ.sub(0), vel_noslip, sub_domain=2)
-    bc_step_right = DirichletBC(VQ.sub(0), vel_noslip, sub_domain=3)
-    #bc_walls      = DirichletBC(VQ.sub(0).sub(1), 0.0, sub_domain=6)
-    #bc_step_left  = DirichletBC(VQ.sub(0), vel_noslip, sub_domain=4)
-    #bc_step_right = DirichletBC(VQ.sub(0), vel_noslip, sub_domain=5)
+    if quad:
+        bc_walls      = DirichletBC(VQ.sub(0).sub(1), 0.0, sub_domain=4)
+        bc_step_left  = DirichletBC(VQ.sub(0), vel_noslip, sub_domain=2)
+        bc_step_right = DirichletBC(VQ.sub(0), vel_noslip, sub_domain=3)
+    else:
+        bc_walls      = DirichletBC(VQ.sub(0).sub(1), 0.0, sub_domain=6)
+        bc_step_left  = DirichletBC(VQ.sub(0), vel_noslip, sub_domain=4)
+        bc_step_right = DirichletBC(VQ.sub(0), vel_noslip, sub_domain=5)
     bcs_step = [bc_step_left, bc_step_right, bc_walls]
     return bcs_step
 
@@ -248,9 +255,9 @@ else:
 (a,l) = WeakForm.linear_stokes(rhs, VQ, visc_upper, dx, dx_upper,
                                visc_lower, dx_lower, visc_middle, dx_middle)
 
+vvstokesprob.set_linearvariationalproblem(a, l, sol, bcs)
 for i in range(args.itref+1):
     #TODO: why have to set it everytime?
-    vvstokesprob.set_linearvariationalproblem(a, l, sol, bcs)
     vvstokessolver = VariableViscosityStokesSolver(vvstokesprob, 
                                                    args.solver_type, 
                                                    args.case,
@@ -259,6 +266,8 @@ for i in range(args.itref+1):
     vvstokessolver.set_linearvariationalsolver()
     vvstokessolver.set_transfers()
     vvstokessolver.solve()
+
+transfers = vvstokessolver.get_transfers()
 
 ## uncomment to compare solutions between augmented/unaugmented sys
 #solve(a==l, sol, bcs)
@@ -328,14 +337,14 @@ for itn in range(NL_SOLVER_MAXITER+1):
     vvstokesprob.set_bcsfun(bcstep_fun)
     bcs_step = vvstokesprob.get_bcs(mesh)
     vvstokesprob.set_linearvariationalproblem(hess, grad, step, bcs_step)
-    vvstokessolver = VariableViscosityStokesSolver(vvstokesprob, 
-                                                   args.solver_type, 
-                                                   args.case,
-                                                   args.gamma,
-                                                   args.asmbackend)
+    #vvstokessolver = VariableViscosityStokesSolver(vvstokesprob, 
+    #                                               args.solver_type, 
+    #                                               args.case,
+    #                                               args.gamma,
+    #                                               args.asmbackend)
     #vvstokessolver.set_precondviscosity([previsc1expr])
     vvstokessolver.set_linearvariationalsolver()
-    vvstokessolver.set_transfers()
+    vvstokessolver.set_transfers(transfers=transfers)
     vvstokessolver.solve()
     lin_it=vvstokessolver.get_iterationnum()
     lin_it_total += lin_it

@@ -469,7 +469,7 @@ class VariableViscosityStokesSolver():
                 "ksp_type": "preonly",
                 "ksp_max_it": 1,
                 "pc_type": "lu",
-                #"pc_factor_mat_solver_type": "superlu_dist",
+                "pc_factor_mat_solver_type": "mumps",
             }
 
             fieldsplit_0_hypre = {
@@ -480,7 +480,7 @@ class VariableViscosityStokesSolver():
 
             mg_levels_solver_rich = {
                 "ksp_type": "fgmres",
-                "ksp_max_it": 5,
+                "ksp_max_it": 10,
                 "pc_type": "bjacobi",
             }
 
@@ -491,10 +491,10 @@ class VariableViscosityStokesSolver():
             }
 
             mg_levels_solver = {
-                # "ksp_monitor_true_residual": None,
+                #"ksp_monitor_true_residual": None,
                 "ksp_type": "fgmres",
                 "ksp_norm_type": "unpreconditioned",
-                "ksp_max_it": 5,
+                "ksp_max_it": 10,
                 "pc_type": "python",
                 #"pc_python_type": "hexstar.ASMHexStarPC" if (dim==3 and quad==True) 
                 #                                        else "firedrake.ASMStarPC",
@@ -513,11 +513,16 @@ class VariableViscosityStokesSolver():
             }
 
             fieldsplit_0_mg = {
-                "ksp_type": "preonly",
+                "ksp_type": "fgmres",
                 "ksp_norm_type": "unpreconditioned",
+                #"ksp_view": None,
+                "ksp_max_it": 5,
                 "ksp_convergence_test": "skip",
+                #"ksp_monitor_true_residual": None,
                 "pc_type": "mg",
                 "pc_mg_type": "full",
+                #"pc_mg_type": "multiplicative",
+                #"pc_mg_cycle_type": "v",
                 "pc_mg_log": None,
                 #"mg_levels": mg_levels_solver,
                 "mg_coarse_pc_type": "python",
@@ -534,7 +539,7 @@ class VariableViscosityStokesSolver():
                 "ksp_gmres_restart": 200,
                 "ksp_rtol": 1.0e-6,
                 "ksp_atol": 1.0e-10,
-                "ksp_max_it": 300,
+                "ksp_max_it": 200,
                 #"ksp_view": None,
                 "ksp_monitor_true_residual": None,
                 "ksp_converged_reason": None,
@@ -569,7 +574,7 @@ class VariableViscosityStokesSolver():
                     "ksp_type": "preonly",
                     "ksp_rtol": 1.0e-6,
                     "ksp_atol": 1.0e-10,
-                    "ksp_max_it": 300,
+                    "ksp_max_it": 200,
                     "ksp_monitor_true_residual": None,
                     "ksp_converged_reason": None,
                     "pc_type": "lu",
@@ -679,4 +684,3 @@ class VariableViscosityStokesSolver():
         if setBTWBdics is True:
             self.set_BTWB_dicts()
         self.set_parameters()
-

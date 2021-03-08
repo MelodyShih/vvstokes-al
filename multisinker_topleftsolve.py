@@ -189,7 +189,7 @@ solver_hypre = {
     "pc_type": "hypre",
 }
 
-mg_levels_solver_cheb = {
+mg_levels_solver_rich = {
     "ksp_type": "fgmres",
     "ksp_max_it": 5,
     "pc_type": "bjacobi",
@@ -227,9 +227,9 @@ solver_mg = {
 if args.solver_type == "almg":
     params = {**common, **solver_mg}
     params["mg_levels"] = mg_levels_solver
-elif args.solver_type == "almgcheb":
+elif args.solver_type == "almgrich":
     params = {**common, **solver_mg}
-    params["mg_levels"] = mg_levels_solver_cheb
+    params["mg_levels"] = mg_levels_solver_rich
 elif args.solver_type == "allu":
     params = {**common, **solver_lu}
 elif args.solver_type == "alamg":

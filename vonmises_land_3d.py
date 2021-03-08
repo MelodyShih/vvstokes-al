@@ -23,7 +23,7 @@ import argparse
 import numpy as np
 PETSc.Sys.popErrorHandler()
 
-import logging
+#import logging
 #logging.basicConfig(level="INFO")
 
 #======================================
@@ -54,6 +54,10 @@ gamma = Constant(args.gamma)
 deg = args.quad_deg
 divdegree = None
 quad = args.quad
+rebalance = args.rebalance
+
+#firedrake.disable_performance_optimisations()
+firedrake.parameters["quadrature_degree"]=deg
 
 #======================================
 # Parameters
@@ -62,7 +66,6 @@ quad = args.quad
 VISC_TYPE = 'const' # const, anomaly
 VISC_REG  = 1.e-3
 VISC_MAX  = 1.e3
-VISC_REG  = 1e-3
 
 RHO = 2700.0
 GRAVITY = 9.81
@@ -74,9 +77,9 @@ REF_VISCOSITY   = 1.e22
 REF_STRAIN_RATE = REF_VELOCITY*YEAR_PER_SEC/REF_HEIGHT
 REF_STRESS_RATE = 2.0*REF_STRAIN_RATE*REF_VISCOSITY
 
-VISC_UPPER_SCALED   = 1.e24/REF_VISCOSITY
+VISC_UPPER_SCALED   = 1.e23/REF_VISCOSITY
 VISC_MIDDLE_SCALED  = 1.e21/REF_VISCOSITY
-VISC_LOWER_SCALED   = 1.e18/REF_VISCOSITY
+VISC_LOWER_SCALED   = 1.e19/REF_VISCOSITY
 BOUNDARY_INFLOW_VELOCITY = 1.0
 
 # nolinear solver parameters
@@ -89,7 +92,7 @@ NL_SOLVER_STEP_MAXITER = 15
 NL_SOLVER_STEP_ARMIJO    = 1.0e-4
 
 # output
-OUTPUT_VTK=True
+OUTPUT_VTK=False
 #======================================
 # Setup VariableViscosityStokesProblem
 #======================================
@@ -102,15 +105,23 @@ vvstokesprob = VariableViscosityStokesProblem(3, # dimension of the problem
 #basemesh = Mesh('land_3d.msh')
 
 if quad:
-    basemesh = Mesh('mesh/land_quad.msh')
-    vvstokesprob.Lz = 1.0
+    basemesh = Mesh('mesh/land_quad_simple.msh')
+    #basemesh = Mesh('mesh/land_quad_simple_twodomain.msh')
+    #basemesh = Mesh('mesh/land_quad.msh')
+    PETSc.Sys.Print("basemesh contains %d cells" % basemesh.num_cells())
+    vvstokesprob.Lz = 0.25
     vvstokesprob.Nz = 4
-    vvstokesprob.set_meshhierarchy(basemesh, nref)
+    vvstokesprob.set_meshhierarchy(basemesh, nref, rebal=rebalance)
+    sdl = [5, 6, 7, 4, 2, 3]
+    #sdl = [-1, 5, 6, 3, 1, 2]
+    #sdl = [2, 3, 1, 6, 4, 5]
 
     mesh = vvstokesprob.get_mesh()
-    dx_upper  = Measure("dx", domain=mesh, subdomain_id=2)
-    dx_middle = Measure("dx", domain=mesh, subdomain_id=3)
-    dx_lower  = Measure("dx", domain=mesh, subdomain_id=1)
+    mh = vvstokesprob.get_meshhierarchy()
+    dx_upper  = Measure("dx", domain=mesh, subdomain_id=sdl[0])
+    #dx_upper  = None
+    dx_middle = Measure("dx", domain=mesh, subdomain_id=sdl[1])
+    dx_lower  = Measure("dx", domain=mesh, subdomain_id=sdl[2])
     dx = Measure("dx", domain=mesh, subdomain_id="everywhere")
 else:
     basemesh = Mesh('mesh/land_3d.msh')
@@ -128,36 +139,18 @@ vvstokesprob.set_measurelist([dx])
 # Setup boundary condition
 #--------------------------------------
 mesh = vvstokesprob.get_mesh()
-PETSc.Sys.Print(mesh.topological.exterior_facets.unique_markers)
+mh = vvstokesprob.get_meshhierarchy()
+
 V, Q, Vd = vvstokesprob.get_functionspace(mesh,info=True, dualFncSp=True)
 VQ = V*Q
+
+from sparsity import cache_sparsity
+cache_sparsity(VQ, V, Q)
+
 
 # set functions for boundary conditions
 vel_noslip = Constant((0.0, 0.0, 0.0))
 vel_inflow = Constant((BOUNDARY_INFLOW_VELOCITY, 0.0, 0.0))
-
-#class LeftInflowExpression(Expression):
-#    def eval(self, value, x):
-#        c = 0.2
-#        value[0] = (x[2]+1)*BOUNDARY_INFLOW_VELOCITY
-#        value[1] = 0.0
-#        value[2] = 0.0
-#
-#    def value_shape(self):
-#        return (3,)
-#
-#class RightInflowExpression(Expression):
-#    def eval(self, value, x):
-#        c = 0.2
-#        value[0] = -(x[2]+1)*BOUNDARY_INFLOW_VELOCITY
-#        value[1] = 0.0
-#        value[2] = 0.0
-#
-#    def value_shape(self):
-#        return (3,)
-#vel_inflow_left  = LeftInflowExpression()
-#vel_inflow_right = RightInflowExpression()
-
 
 def bc_fun(mesh):
     V, Q = vvstokesprob.get_functionspace(mesh)
@@ -166,13 +159,14 @@ def bc_fun(mesh):
     x = SpatialCoordinate(mesh)
     vel_inflow_left  = ( (x[2]+1)*BOUNDARY_INFLOW_VELOCITY, 0.0, 0.0)
     vel_inflow_right = (-(x[2]+1)*BOUNDARY_INFLOW_VELOCITY, 0.0, 0.0)
+
     # construct boundary conditions
     if quad:
         bc_wall_z1   = DirichletBC(VQ.sub(0).sub(2), 0.0, "top") 
         bc_wall_z2   = DirichletBC(VQ.sub(0).sub(2), 0.0, "bottom") 
-        bc_wall_y    = DirichletBC(VQ.sub(0).sub(1), 0.0, sub_domain=6) 
-        bc_left      = DirichletBC(VQ.sub(0), vel_inflow_left , sub_domain=4)
-        bc_right     = DirichletBC(VQ.sub(0), vel_inflow_right, sub_domain=5)
+        bc_wall_y    = DirichletBC(VQ.sub(0).sub(1), 0.0      , sub_domain=sdl[3]) 
+        bc_left      = DirichletBC(VQ.sub(0), vel_inflow_left , sub_domain=sdl[4])
+        bc_right     = DirichletBC(VQ.sub(0), vel_inflow_right, sub_domain=sdl[5])
     else:
         bc_wall_z1   = DirichletBC(VQ.sub(0).sub(2), 0.0, sub_domain=3) 
         bc_wall_z2   = DirichletBC(VQ.sub(0).sub(2), 0.0, sub_domain=4) 
@@ -191,9 +185,9 @@ def bcstep_fun(mesh):
     if quad:
         bc_wall_z1    = DirichletBC(VQ.sub(0).sub(2), 0.0, "top")
         bc_wall_z2    = DirichletBC(VQ.sub(0).sub(2), 0.0, "bottom")
-        bc_wall_y     = DirichletBC(VQ.sub(0).sub(1), 0.0, sub_domain=6) 
-        bc_step_left  = DirichletBC(VQ.sub(0), vel_noslip, sub_domain=4)
-        bc_step_right = DirichletBC(VQ.sub(0), vel_noslip, sub_domain=5)
+        bc_wall_y     = DirichletBC(VQ.sub(0).sub(1), 0.0, sub_domain=sdl[3]) 
+        bc_step_left  = DirichletBC(VQ.sub(0), vel_noslip, sub_domain=sdl[4])
+        bc_step_right = DirichletBC(VQ.sub(0), vel_noslip, sub_domain=sdl[5])
     else:
         bc_wall_z1    = DirichletBC(VQ.sub(0).sub(2), 0.0, sub_domain=3) 
         bc_wall_z2    = DirichletBC(VQ.sub(0).sub(2), 0.0, sub_domain=4) 
@@ -204,7 +198,7 @@ def bcstep_fun(mesh):
     return bcs_step
 
 vvstokesprob.set_bcsfun(bc_fun)
-bcs =  vvstokesprob.get_bcs(mesh)
+bcs = vvstokesprob.get_bcs(mesh)
 
 #--------------------------------------
 # Setup viscosity, right hand side
@@ -218,14 +212,14 @@ visc_middle = Constant(VISC_MIDDLE_SCALED)
 visc_lower  = Constant(VISC_LOWER_SCALED)
 def visc_fun(mesh):
     V, Q = vvstokesprob.get_functionspace(mesh)
-    return Constant(1.0)
+    return Constant(VISC_MIDDLE_SCALED)
 vvstokesprob.set_viscosity(visc_fun) #used for W
 
 #--------------------------------------
 # Setup weak form
 #--------------------------------------
 # create solution vectors
-sol, sol_prev, step    = Function(VQ), Function(VQ), Function(VQ)
+sol, sol_prev, step = Function(VQ), Function(VQ), Function(VQ)
 sol_u      = sol.split()[0]
 sol_p      = sol.split()[1]
 sol_prev_u = sol_prev.split()[0]
@@ -285,6 +279,9 @@ else:
 #previsc1expr, previsc2expr = WeakForm.precondvisc(sol_u, sol_p, VQ, visc_upper, 
 #                                                  VISC_REG, yield_strength, 
 #                                                  visc_lower)
+# viscosity field from linearization of the newton systems
+uII = WeakForm.strainrateII(sol_u)
+mu = 2*visc_upper*yield_strength/(2*uII*visc_upper + yield_strength) 
 
 #======================================
 # Solve the nonlinear problem
@@ -294,13 +291,13 @@ else:
 (a,l) = WeakForm.linear_stokes(rhs, VQ, visc_upper, dx, dx_upper,
                                visc_lower, dx_lower, visc_middle, dx_middle)
 
-for i in range(args.itref+1):
+vvstokessolver = VariableViscosityStokesSolver(vvstokesprob, 
+                                               args.solver_type, 
+                                               args.case,
+                                               args.gamma,
+                                               args.asmbackend)
+for i in range(2):
     vvstokesprob.set_linearvariationalproblem(a, l, sol, bcs)
-    vvstokessolver = VariableViscosityStokesSolver(vvstokesprob, 
-                                                   args.solver_type, 
-                                                   args.case,
-                                                   args.gamma,
-                                                   args.asmbackend)
     vvstokessolver.set_linearvariationalsolver()
     vvstokessolver.set_transfers()
     vvstokessolver.solve()
@@ -317,6 +314,8 @@ for i in range(args.itref+1):
 #PETSc.Sys.Print("relative diff in pre: ",\
 #       norm(sol.split()[1]-sol2.split()[1])\
 #       /norm(sol.split()[1]))
+
+#vvstokessolver.set_precondviscosity([mu])
 
 # initialize gradient
 g = assemble(grad, bcs=bcstep_fun(mesh))

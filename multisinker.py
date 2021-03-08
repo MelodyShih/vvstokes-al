@@ -115,6 +115,7 @@ vvstokesprob = VariableViscosityStokesProblem(dim, # dimension of the problem
                                     quaddivdegree=divdegree) # qaudrature divdeg                      
 # set basemesh, mesh hierarchy  
 basemesh = vvstokesprob.create_basemesh("rectangle", N, N, N, 4, 4, 4)
+PETSc.Sys.Print("basemesh contains %d cells" % basemesh.num_cells())
 vvstokesprob.set_meshhierarchy(basemesh, nref, rebal)
 # set viscosity field
 vvstokesprob.set_viscosity(mu_expr)
