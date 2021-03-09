@@ -430,6 +430,11 @@ if not case == 3:
         BBClevel =  assemble(- tmpq * div(tmpu) * dx(degree=divdegree), bcs=tmpbcs, mat_type='nest').petscmat.getNestSubMatrix(1, 0)
         Wlevel *= gamma
         #todo: fill BBC_dict and W_dict and to the right thin in modify_residual
+        if level in BBCTW_dict:
+            BBCTWlevel = BBClevel.transposeMatMult(Wlevel,result=BBCTW_dict[level])
+        else:
+            BBCTWlevel = BBClevel.transposeMatMult(Wlevel)
+            BBCTW_dict[level] = BBCTWlevel
         if level in BBCTWB_dict:
             BBCTWBlevel = Wlevel.PtAP(BBClevel, result=BBCTWB_dict[level])
         else:
