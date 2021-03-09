@@ -142,9 +142,9 @@ class VariableViscosityStokesProblem():
                     elt = VectorElement(TensorProductElement(horiz_elt, vert_elt))
                     V = FunctionSpace(mesh, elt)
                     Q = FunctionSpace(mesh, "DPC", k-1)
-                    # Q = FunctionSpace(mesh, "DQ", k-2)
+                    #Q = FunctionSpace(mesh, "DQ", k-2)
 
-                    Vd_e = TensorElement('DQ', mesh.ufl_cell(), k)
+                    Vd_e = TensorElement('DQ', mesh.ufl_cell(), k-1)
                     Vd = FunctionSpace(mesh, Vd_e)
                 else:
                     Pk = FiniteElement("Lagrange", mesh.ufl_cell(), k)
@@ -389,6 +389,7 @@ class VariableViscosityStokesSolver():
 
         self.BBCTWB_dict = BBCTWB_dict
         self.BBCTW_dict = BBCTW_dict 
+        PETSc.Sys.Print("Computed BTWB products")
         
     def set_transfers(self, transfers=None):
         if transfers is None and self.solver_type == "almg"\
@@ -427,6 +428,7 @@ class VariableViscosityStokesSolver():
                                  Acb, BTWBcb, tdim, 'uniform',
                                  backend=asmbackend,
                                  hexmesh=(dim==3 and quad))
+            vtransfer.force_rebuild()
             qtransfer = NullTransfer()
             transfers = {V.ufl_element(): (vtransfer.prolong, 
                                            vtransfer.restrict, 
@@ -513,9 +515,10 @@ class VariableViscosityStokesSolver():
             }
 
             fieldsplit_0_mg = {
-                "ksp_type": "fgmres",
+                #"ksp_type": "preonly",
                 "ksp_norm_type": "unpreconditioned",
                 #"ksp_view": None,
+                "ksp_type": "fgmres",
                 "ksp_max_it": 5,
                 "ksp_convergence_test": "skip",
                 #"ksp_monitor_true_residual": None,
