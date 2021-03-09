@@ -301,7 +301,7 @@ def gradient(u, p, rhs_mom, FncSp, visc1, viscosity_min, yield_strength,
     #                  _stabilizationRhs(rhs_mom, p_test, h, stab)
     return grad
 
-def precondvisc(u, p, FncSp, visc1, viscosity_min, yield_strength, visc2=None):
+def precondvisc(u, p, visc1, viscosity_min, yield_strength, visc2=None):
 
     U         = fd.sym(fd.nabla_grad(u))
     sigma     = fd.sqrt(fd.inner(0.5*U, U))
