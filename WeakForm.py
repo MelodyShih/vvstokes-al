@@ -318,6 +318,66 @@ def precondvisc(u, p, visc1, viscosity_min, yield_strength, visc2=None):
         return precondvisc1, precondvisc2
     
     return precondvisc1
+
+def hessian_Picard(u, p, FncSp, visc1, viscosity_min, yield_strength, dx=None, 
+                  dx1=None, visc2=0.0, dx2=None, visc3=0.0, dx3=None,):
+    '''
+    Creates the weak form for the Hessian of the Picard linearization:
+
+    (1) Viscoplastic domain (dx1)
+        \int (2*viscmin + dPhi(eII(u))/(2*eII(u)))*(grad_s utr,grad_s ute) 
+                                                  - ptr*div(ute) - div(utr)*pte
+
+    (2) Isoviscous domain (dx2)
+        \int 2*visc2*(grad_s utr,grad_s ute) - ptr*div(ute) - div(utr)*pte
+    where
+
+        utr = u_trial = TrialFunction of the velocity space
+        ptr = p_trial = TrialFunction of the pressure space
+        ute = u_test = TestFunction of the velocity space
+        pte = p_test = TestFunction of the pressure space
+        eII(u) = sqrt of the 2nd invariant of the strain rate (of u)
+        dPhi(eII(u)) = derivative of Phi with respect to eII(u)
+        viscmin = viscosity_min
+    '''
+    assert 0.0 <= viscosity_min
+    if dx is None:
+        dx  = fd.dx
+        dx1 = dx
+
+    (u_trial,p_trial) = fd.TrialFunctions(FncSp)
+    (u_test,p_test)   = fd.TestFunctions(FncSp)
+    U         = fd.sym(fd.nabla_grad(u))
+    U_trial   = fd.sym(fd.nabla_grad(u_trial))
+    U_test    = fd.sym(fd.nabla_grad(u_test))
+
+    sigma     = fd.sqrt(fd.inner(0.5*U, U))
+    visc1_stress = Abstract.WeakForm_Phi.hessian_Picard(U=U, 
+        U_trial=U_trial, U_test=U_test,
+        dPhi=dPhi(sigma, yield_strength, visc1),
+        reg=Reg(viscosity_min), dx=dx1)
+
+    if dx2 is not None:
+        visc2_stress = Abstract.WeakForm_Phi.hessian_Picard(U=U, 
+            U_trial=U_trial, U_test=U_test,
+            dPhi=dPhi(sigma, 1e16, visc2),
+            reg=Reg(viscosity_min), dx=dx2)
+    else:
+        visc2_stress = 0.0
+
+    if dx3 is not None:
+        visc3_stress = Abstract.WeakForm_Phi.hessian_Picard(U=U, 
+            U_trial=U_trial, U_test=U_test,
+            dPhi=dPhi(sigma, 1e16, visc3),
+            reg=Reg(viscosity_min), dx=dx3)
+    else:
+        visc3_stress = 0.0
+
+    grad_press   = -p_trial*fd.div(u_test)*dx
+    div_vel      = -fd.div(u_trial)*p_test*dx
+    hess         = visc1_stress + visc2_stress + visc3_stress + grad_press + div_vel
+    return hess
+
     
 
 def hessian_NewtonStandard(u, p, FncSp, visc1, viscosity_min, yield_strength, 
