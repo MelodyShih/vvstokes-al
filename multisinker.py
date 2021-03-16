@@ -97,7 +97,7 @@ def chi_n(mesh):
         else:
             raise NotImplementedError("Only implemented for dim=2,3")
     return reduce(lambda x, y : x*y, indis, Constant(1.0))
-def mu_expr(mesh):
+def mu_expr(mesh,level=0):
     return (mu_max-mu_min)*(1-chi_n(mesh)) + mu_min
 
 def mu(mesh):
