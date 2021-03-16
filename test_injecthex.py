@@ -1,31 +1,47 @@
 from firedrake import *
 from firedrake.petsc import PETSc
-from firedrake.mg.utils import get_level
 
 Nx = Ny = Nz = 8
 Lx = Ly = Lz = 4
 nref = 1
-distp = {"partition": True, 
-         "overlap_type": (DistributedMeshOverlapType.VERTEX, 1)}
-basemesh = RectangleMesh(Nx, Ny, Lx, Ly, distribution_parameters=distp, quadrilateral=True)
-basemh = MeshHierarchy(basemesh, nref)
-mh = ExtrudedMeshHierarchy(basemh, height=Lz, base_layer=Nz)
-
 k = 2
+
+#hex mesh
+quadbasemesh = RectangleMesh(Nx, Ny, Lx, Ly, quadrilateral=True)
+quadbasemh = MeshHierarchy(quadbasemesh, nref)
+hexmh = ExtrudedMeshHierarchy(quadbasemh, height=Lz, base_layer=Nz)
+
+
 horiz_elt = FiniteElement("CG", quadrilateral, k)
 vert_elt  = FiniteElement("CG", interval, k)
-elt = VectorElement(TensorProductElement(horiz_elt, vert_elt))
-V = FunctionSpace(mh[-1], elt)
+elt = TensorProductElement(horiz_elt, vert_elt)
 
-u = Function(V)
-u.interpolate(Expression("sin(x[0])"))
-File("/scratch1/04841/tg841407/stokes_2021-03-15/vtk-mini/uf_level"+str(level)+".pvd").write(ulevel)
+xhex = SpatialCoordinate(hexmh[-1])
+Vhex = FunctionSpace(hexmh[-1], elt)
+ufhex = Function(Vhex)
+ufhex.interpolate(sin(2*pi*xhex[0]))
+File("/scratch1/04841/tg841407/stokes_2021-03-15/vtk-mini/ufhex.pvd").write(ufhex)
 
 
-## visualize sym(grad)
-for level in range(nref):
-    Vlevel = FunctionSpace(mh[level], elt)
-    ulevel = Function(Vlevel)
-    inject(u, ulevel)
+Vchex = FunctionSpace(hexmh[0], elt)
+uchex = Function(Vchex)
+inject(ufhex, uchex)
+File("/scratch1/04841/tg841407/stokes_2021-03-15/vtk-mini/uchex.pvd").write(uchex)
 
-    File("/scratch1/04841/tg841407/stokes_2021-03-15/vtk-mini/uc_level"+str(level)+".pvd").write(ulevel)
+#tet mesh
+tetbasemesh = BoxMesh(Nx, Ny, Nz, Lx, Ly, Lz)
+tetmh = MeshHierarchy(tetbasemesh, nref)
+
+elt = FiniteElement("CG", tetmh[-1].ufl_cell(), k)
+
+xtet = SpatialCoordinate(tetmh[-1])
+Vtet = FunctionSpace(tetmh[-1], elt)
+uftet = Function(Vtet)
+uftet.interpolate(sin(2*pi*xtet[0]))
+File("/scratch1/04841/tg841407/stokes_2021-03-15/vtk-mini/uftet.pvd").write(uftet)
+
+Vctet = FunctionSpace(tetmh[0], elt)
+uctet = Function(Vctet)
+inject(uftet, uctet)
+File("/scratch1/04841/tg841407/stokes_2021-03-15/vtk-mini/uctet.pvd").write(uctet)
+
