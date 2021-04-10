@@ -139,6 +139,9 @@ else:
     divrhs = Constant(0)
 rhsweak += divrhs * q * dx(degree=divdegree)
 
+mh = vvstokesprob.get_meshhierarchy()
+Vc, Qc = vvstokesprob.get_functionspace(mh[0],info=True)
+
 #--------------------------------------
 # Setup weak form of the variable viscosity Stokes eq
 #--------------------------------------

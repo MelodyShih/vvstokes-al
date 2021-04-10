@@ -96,7 +96,7 @@ def chi_n(mesh):
         else:
             raise NotImplementedError("Only implemented for dim=2,3")
     return reduce(lambda x, y : x*y, indis, Constant(1.0))
-def mu_expr(mesh):
+def mu_expr(meshl, level=0):
     return (mu_max-mu_min)*(1-chi_n(mesh)) + mu_min
 
 def mu(mesh):
@@ -171,11 +171,11 @@ vvstokessolver = VariableViscosityStokesSolver(vvstokesprob,
 common = {
     "snes_type": "ksponly",
     "ksp_type": "fgmres",
-    "ksp_gmres_restart": 200,
+    "ksp_gmres_restart": 500,
     "ksp_norm_type": "unpreconditioned",
     "ksp_rtol": 1.0e-6,
     "ksp_atol": 1.0e-10,
-    "ksp_max_it": 200,
+    "ksp_max_it": 500,
     "ksp_converged_reason": None,
     "ksp_monitor_true_residual": None,
 }
@@ -187,6 +187,16 @@ solver_lu = {
 
 solver_hypre = {
     "pc_type": "hypre",
+    "pc_hypre_type": "boomeramg",
+    "pc_hypre_boomeramg_strong_threshold": 0.25,
+    "pc_hypre_boomeramg_max_iter": 5,
+    "pc_hypre_boomeramg_grid_sweeps_down": 5,
+    "pc_hypre_boomeramg_grid_sweeps_up": 5,
+    "pc_hypre_boomeramg_grid_sweeps_coarse": 1,
+    "pc_hypre_boomeramg_cycle_type": "W",
+    "pc_hypre_boomeramg_max_levels": 25, 
+    "pc_hypre_boomeramg_print_statistics": None,
+    "ksp_view": None,
 }
 
 mg_levels_solver_rich = {

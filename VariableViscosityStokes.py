@@ -170,6 +170,8 @@ class VariableViscosityStokesProblem():
                                              % ( V.dim(), V.dim()/size))
             PETSc.Sys.Print("dim(Q) = %i (%i per core) " \
                                              % ( Q.dim(), Q.dim()/size))
+            from sparsity import cache_sparsity
+            cache_sparsity(Z, V, Q)
         if dualFncSp is True:
             return V, Q, Vd
         else: 
@@ -428,7 +430,7 @@ class VariableViscosityStokesSolver():
             tdim = self.problem.mesh.topological_dimension()
             mu_transfer = self.problem.get_viscosity()
             #vtransfer = AlgebraicSchoeberlTransfer((mu_transfer, gamma), 
-            #                 A_callback, BTWB_callback, tdim, 'uniform', 
+            #                 Acb, BTWBcb, tdim, 'uniform', 
             #                 backend='lu', hexmesh=(dim == 3 and quad))
             vtransfer = AlgebraicSchoeberlTransfer((mu_transfer, gamma), 
                                  Acb, BTWBcb, tdim, 'uniform',
@@ -438,6 +440,16 @@ class VariableViscosityStokesSolver():
             qtransfer = NullTransfer()
             transfers = {V.ufl_element(): (vtransfer.prolong, 
                                            vtransfer.restrict, 
+                                           inject),
+                         Q.ufl_element(): (prolong, restrict, qtransfer.inject)}
+            transfermanager = TransferManager(native_transfers=transfers)
+            self.transfers = transfers
+            self.lvsolver.set_transfer_manager(transfermanager)
+        elif transfers is None:
+            V, Q = self.problem.get_functionspace(self.problem.mesh)
+            qtransfer = NullTransfer()
+            transfers = {V.ufl_element(): (prolong, 
+                                           restrict, 
                                            inject),
                          Q.ufl_element(): (prolong, restrict, qtransfer.inject)}
             transfermanager = TransferManager(native_transfers=transfers)
@@ -488,8 +500,9 @@ class VariableViscosityStokesSolver():
 
             mg_levels_solver_rich = {
                 "ksp_type": "fgmres",
-                "ksp_max_it": 10,
+                "ksp_max_it": 5,
                 "pc_type": "bjacobi",
+                #"ksp_monitor_true_residual": None,
             }
 
             mg_levels_solver_cheb = {
@@ -502,7 +515,7 @@ class VariableViscosityStokesSolver():
                 #"ksp_monitor_true_residual": None,
                 "ksp_type": "fgmres",
                 "ksp_norm_type": "unpreconditioned",
-                "ksp_max_it": 10,
+                "ksp_max_it": 5,
                 "pc_type": "python",
                 #"pc_python_type": "hexstar.ASMHexStarPC" if (dim==3 and quad==True) 
                 #                                        else "firedrake.ASMStarPC",
@@ -521,11 +534,11 @@ class VariableViscosityStokesSolver():
             }
 
             fieldsplit_0_mg = {
-                #"ksp_type": "preonly",
+                "ksp_type": "preonly",
                 "ksp_norm_type": "unpreconditioned",
                 #"ksp_view": None,
-                "ksp_type": "fgmres",
-                "ksp_max_it": 5,
+                #"ksp_type": "fgmres",
+                #"ksp_max_it": 5,
                 "ksp_convergence_test": "skip",
                 #"ksp_monitor_true_residual": None,
                 "pc_type": "mg",
@@ -534,13 +547,13 @@ class VariableViscosityStokesSolver():
                 #"pc_mg_cycle_type": "v",
                 "pc_mg_log": None,
                 #"mg_levels": mg_levels_solver,
-                "mg_coarse_ksp_type": "richardson",
-                "mg_coarse_ksp_max_it": 1,
+                #"mg_coarse_ksp_type": "richardson",
+                #"mg_coarse_ksp_max_it": 1,
                 "mg_coarse_pc_type": "python",
                 "mg_coarse_pc_python_type": "firedrake.AssembledPC",
                 "mg_coarse_assembled_pc_type": "lu",
                 "mg_coarse_assembled_pc_factor_mat_solver_type": "superlu_dist",
-                "mg_coarse_ksp_monitor_true_residual": None,
+                #"mg_coarse_ksp_monitor_true_residual": None,
             }
 
             params = {
@@ -548,10 +561,10 @@ class VariableViscosityStokesSolver():
                 "snes_monitor": None,
                 "mat_type": "nest",
                 "ksp_type": "fgmres",
-                "ksp_gmres_restart": 200,
+                "ksp_gmres_restart": 300,
                 "ksp_rtol": 1.0e-6,
                 "ksp_atol": 1.0e-10,
-                "ksp_max_it": 200,
+                "ksp_max_it": 300,
                 #"ksp_view": None,
                 "ksp_monitor_true_residual": None,
                 "ksp_converged_reason": None,
