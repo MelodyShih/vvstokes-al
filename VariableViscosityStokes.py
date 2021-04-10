@@ -302,7 +302,7 @@ class VariableViscosityStokesProblem():
     def set_measurelist(self, dxlist):
         self.dxlist = dxlist
 
-    def get_W_mat(self, mesh, case, w):
+    def get_W_mat(self, mesh, case, w, level):
         deg = self.quaddeg
         V, Q = self.get_functionspace(mesh)
         p = TrialFunction(Q)
@@ -310,7 +310,7 @@ class VariableViscosityStokesProblem():
         if case == 4:
             W = assemble(Tensor(inner(p,q)*dx).inv, mat_type='aij').petscmat
         elif case == 5:
-            mu = self.mufun(mesh)
+            mu = self.mufun(mesh, level)
             W = assemble(Tensor(1.0/mu*inner(p,q)*dx(degree=deg)).inv,\
                                         mat_type='aij').petscmat
         elif case == 6:
@@ -359,15 +359,21 @@ class VariableViscosityStokesSolver():
     def set_precondviscosity(self, mufunlist): 
         self.precond_mulist = mufunlist
     def set_BTWB_dicts(self):
-        BBCTWB_dict = {} # These are of type PETSc.Mat
-        BBCTW_dict = {} # These are of type PETSc.Mat
+        if self.BBCTWB_dict is not None:
+            self.BBCTWB_dict.clear() # These are of type PETSc.Mat
+            self.BBCTW_dict.clear() # These are of type PETSc.Mat
+            BBCTWB_dict = {} # These are of type PETSc.Mat
+            BBCTW_dict = {} # These are of type PETSc.Mat
+        else:
+            BBCTWB_dict = {} # These are of type PETSc.Mat
+            BBCTW_dict = {} # These are of type PETSc.Mat
         mh = self.problem.mh
         case = self.case
         w = self.w
         gamma = self.gamma
         for level in range(self.problem.nref+1):
             levelmesh = mh[level]
-            Wlevel = self.problem.get_W_mat(levelmesh,case,w)
+            Wlevel = self.problem.get_W_mat(levelmesh,case,w,level=level)
             BBClevel = self.problem.get_B_mat(levelmesh)
             Wlevel *= gamma
             if level in BBCTW_dict:
@@ -428,7 +434,7 @@ class VariableViscosityStokesSolver():
                                  Acb, BTWBcb, tdim, 'uniform',
                                  backend=asmbackend,
                                  hexmesh=(dim==3 and quad))
-            vtransfer.force_rebuild()
+            #vtransfer.force_rebuild()
             qtransfer = NullTransfer()
             transfers = {V.ufl_element(): (vtransfer.prolong, 
                                            vtransfer.restrict, 
@@ -528,10 +534,13 @@ class VariableViscosityStokesSolver():
                 #"pc_mg_cycle_type": "v",
                 "pc_mg_log": None,
                 #"mg_levels": mg_levels_solver,
+                "mg_coarse_ksp_type": "richardson",
+                "mg_coarse_ksp_max_it": 1,
                 "mg_coarse_pc_type": "python",
                 "mg_coarse_pc_python_type": "firedrake.AssembledPC",
                 "mg_coarse_assembled_pc_type": "lu",
                 "mg_coarse_assembled_pc_factor_mat_solver_type": "superlu_dist",
+                "mg_coarse_ksp_monitor_true_residual": None,
             }
 
             params = {
@@ -601,17 +610,17 @@ class VariableViscosityStokesSolver():
         params = self.params
         nsp = self.nsp
         mesh = self.problem.mesh
+        nref = self.problem.nref
         V, Q = self.problem.get_functionspace(mesh)
         Z = V*Q
 
         if self.precond_mulist is None:
-            mulist = [self.problem.mufun(mesh)]
+            mulist = [self.problem.mufun(mesh,nref)]
         else:
             mulist = self.precond_mulist
         dxlist = self.problem.dxlist
         deg = self.problem.quaddeg
         dr = 1.0
-        nref = self.problem.nref
         appctx = {"nu_exprlist": mulist, "gamma": self.gamma, 
                   "dr":dr, "case":self.case, "w":self.w, "deg":deg, 
                   "dxlist":dxlist}
