@@ -21,7 +21,10 @@ import Abstract.Vector
 import copy
 import argparse
 import numpy as np
+
 PETSc.Sys.popErrorHandler()
+import gc
+gc.disable()
 
 #import logging
 #logging.basicConfig(level="INFO")
@@ -64,7 +67,7 @@ firedrake.parameters["quadrature_degree"]=deg
 #======================================
 # Stokes problem parameters
 VISC_TYPE = 'const' # const, anomaly
-VISC_REG  = 1.e-3
+VISC_REG  = 1.e-6
 VISC_MAX  = 1.e3
 
 RHO = 2700.0
@@ -77,9 +80,9 @@ REF_VISCOSITY   = 1.e21
 REF_STRAIN_RATE = REF_VELOCITY*YEAR_PER_SEC/REF_HEIGHT
 REF_STRESS_RATE = 2.0*REF_STRAIN_RATE*REF_VISCOSITY
 
-VISC_UPPER_SCALED   = 1.e23/REF_VISCOSITY
+VISC_UPPER_SCALED   = 1.e24/REF_VISCOSITY
 VISC_MIDDLE_SCALED  = 1.e21/REF_VISCOSITY
-VISC_LOWER_SCALED   = 1.e19/REF_VISCOSITY
+VISC_LOWER_SCALED   = 1.e17/REF_VISCOSITY
 BOUNDARY_INFLOW_VELOCITY = 1.0
 
 # nolinear solver parameters
@@ -87,7 +90,7 @@ MONITOR_NL_ITER=True
 MONITOR_NL_STEPSEARCH=False
 NL_SOLVER_GRAD_RTOL = 1e-8
 NL_SOLVER_GRAD_STEP_RTOL = 1e-8
-NL_SOLVER_MAXITER = 1
+NL_SOLVER_MAXITER = 0
 NL_SOLVER_STEP_MAXITER = 15
 NL_SOLVER_STEP_ARMIJO    = 1.0e-4
 
@@ -105,17 +108,21 @@ vvstokesprob = VariableViscosityStokesProblem(3, # dimension of the problem
 #basemesh = Mesh('land_3d.msh')
 
 if quad:
-    basemesh = Mesh('mesh/land_quad_simple_finer.msh')
+    ## land_quad: 0.25, 3
+    ## land_quad_finer: 0.25, 8
+    ## land_quad_finer_finer: 0.25, 14
+    #basemesh = Mesh('mesh/land_quad_simple.msh')
     #basemesh = Mesh('mesh/land_quad_simple_twodomain.msh')
-    #basemesh = Mesh('mesh/land_quad.msh')
+    basemesh = Mesh('mesh/land_quad.msh')
+    #basemesh = Mesh('mesh/land_finer.msh')
     PETSc.Sys.Print("basemesh contains %d cells" % basemesh.num_cells())
     vvstokesprob.Lz = 0.25
-    vvstokesprob.Nz = 5 #32 (finer)
+    vvstokesprob.Nz = 3 #3  #8 (finer)
     vvstokesprob.set_meshhierarchy(basemesh, nref, rebal=rebalance)
-    sdl = [5, 6, 7, 4, 2, 3] #dx_upper, dx_middle, dx_lower
+    #sdl = [5, 6, 7, 4, 2, 3] #dx_upper, dx_middle, dx_lower
                              #face_y=0, face_x=0, face_x=4
     #sdl = [5, -1, 6, 3, 1, 2]
-    #sdl = [2, 3, 1, 6, 4, 5]
+    sdl = [2, 3, 1, 6, 4, 5]
 
     mesh = vvstokesprob.get_mesh()
     mh = vvstokesprob.get_meshhierarchy()
@@ -124,12 +131,15 @@ if quad:
     dx_middle = Measure("dx", domain=mesh, subdomain_id=sdl[1])
     dx_lower  = Measure("dx", domain=mesh, subdomain_id=sdl[2])
     dx = Measure("dx", domain=mesh, subdomain_id="everywhere")
+    dx_upper  = dx_upper(degree=deg)
+    dx_middle = dx_middle(degree=deg)
+    dx_lower  = dx_lower(degree=deg)
 else:
-    #basemesh = Mesh('mesh/land_3d.msh')
-    basemesh = Mesh('mesh/land_tet_simple.msh')
+    basemesh = Mesh('mesh/land_3d.msh')
+    #basemesh = Mesh('mesh/land_tet_simple.msh')
     vvstokesprob.set_meshhierarchy(basemesh, nref)
-    #sdl = [7, 8, 6, 3, 4, 5, 2, 1]
-    sdl = [7, 6, 8, 3, 4, 5, 1, 2] #dx_upper, dx_middle, dx_lower
+    sdl = [7, 8, 6, 3, 4, 5, 2, 1]
+    #sdl = [7, 6, 8, 3, 4, 5, 1, 2] #dx_upper, dx_middle, dx_lower
                                    #top_z=0, top_z=1, face_y=0
                                    #face_x=0, face_x=4
     
@@ -163,10 +173,10 @@ def bc_fun(mesh):
     VQ = V*Q
 
     x = SpatialCoordinate(mesh)
-    #vel_inflow_left  = ( (x[2]+1)*BOUNDARY_INFLOW_VELOCITY, 0.0, 0.0)
-    #vel_inflow_right = (-(x[2]+1)*BOUNDARY_INFLOW_VELOCITY, 0.0, 0.0)
-    vel_inflow_left  = ( BOUNDARY_INFLOW_VELOCITY, 0.0, 0.0)
-    vel_inflow_right = (-BOUNDARY_INFLOW_VELOCITY, 0.0, 0.0)
+    vel_inflow_left  = ( (x[2]+1)*BOUNDARY_INFLOW_VELOCITY, 0.0, 0.0)
+    vel_inflow_right = (-(x[2]+1)*BOUNDARY_INFLOW_VELOCITY, 0.0, 0.0)
+    #vel_inflow_left  = ( BOUNDARY_INFLOW_VELOCITY, 0.0, 0.0)
+    #vel_inflow_right = (-BOUNDARY_INFLOW_VELOCITY, 0.0, 0.0)
 
     # construct boundary conditions
     if quad:
@@ -305,15 +315,16 @@ mu = visc_upper*yield_strength/(2*uII*visc_upper + yield_strength)
                                visc_lower, dx_lower, visc_middle, dx_middle)
 
 vvstokessolver = VariableViscosityStokesSolver(vvstokesprob, 
-                                               args.solver_type, 
+                                               "almg", 
                                                args.case,
-                                               args.gamma,
+                                               10,
                                                args.asmbackend)
 for i in range(2):
     vvstokesprob.set_linearvariationalproblem(a, l, sol, bcs)
     vvstokessolver.set_linearvariationalsolver()
     vvstokessolver.set_transfers()
     vvstokessolver.solve()
+gc.collect()
 
 ## uncomment to compare solutions between augmented/unaugmented sys
 #solve(a==l, sol, bcs)
@@ -330,9 +341,7 @@ for i in range(2):
 
 #vvstokessolver.set_precondviscosity([mu])
 def visc_fun_nonlinear(mesh, level=nref):
-    PETSc.Sys.Print("level", level)
     _, finelevel = get_level(sol_u.ufl_domain())
-    PETSc.Sys.Print("finelevel", finelevel)
     if level == finelevel:
         uII = WeakForm.strainrateII(sol_u)
     else:
@@ -363,7 +372,13 @@ step_length  = 0.0
 
 # assemble mass matrices
 if args.linearization == 'stressvel':
-    Md = assemble(Abstract.WeakForm_Phi.mass(Vd))
+    Md = assemble(Abstract.WeakForm_Phi.mass(Vd), mat_type='baij')
+    Mdmat = Md.petscmat
+    #viewer = PETSc.Viewer().createASCII("Md.txt")
+    #viewer.pushFormat(PETSc.Viewer.Format.ASCII_DENSE)
+    #PETSc.Sys.Print("Start writing matrix")
+    #Mdmat.view(viewer)
+    #PETSc.Sys.Print("Finish writing matrix")
 
 if MONITOR_NL_ITER:
     PETSc.Sys.Print('{0:<3} "{1:>6}"{2:^20}{3:^14}{4:^15}{5:^10}'.format(
@@ -399,11 +414,15 @@ for itn in range(NL_SOLVER_MAXITER+1):
             # project S to unit sphere
             Sprojweak = WeakForm.hessian_dualUpdate_boundMaxMagnitude(S, Vd, 1.0)
             b = assemble(Sprojweak)
+            PETSc.Sys.Print("solve 1")
             solve(Md, S_proj.vector(), b, 
                   solver_parameters={"ksp_monitor_true_residual": None, 
                                      "ksp_type": "preonly", "pc_type":"lu"})
 
+    PETSc.Log.begin()
     # assemble linearized system
+    stagetest = PETSc.Log.Stage("NewtonLinearization")
+    stagetest.push()
     Abstract.Vector.setZero(step)
     vvstokesprob.set_bcsfun(bcstep_fun)
     bcs_step = vvstokesprob.get_bcs(mesh)
@@ -416,14 +435,18 @@ for itn in range(NL_SOLVER_MAXITER+1):
                                                    args.asmbackend)
     #vvstokessolver.set_precondviscosity([mu]) #Schur complement approx
     vvstokessolver.set_linearvariationalsolver()
-    #if itn == 0:
     vvstokessolver.set_transfers()
-    #transfers = vvstokessolver.get_transfers()
+    #if itn == 0:
+    #    vvstokessolver.set_transfers()
+    #    transfers = vvstokessolver.get_transfers()
     #else:
     #    vvstokessolver.set_transfers(transfers=transfers)
     vvstokessolver.solve()
+    stagetest.pop()
+    PETSc.Log.view()
     lin_it=vvstokessolver.get_iterationnum()
     lin_it_total += lin_it
+    gc.collect()
     
     ## uncomment to compare solutions between augmented/unaugmented sys
     #solve(hess == grad, step, bcs_step)
@@ -444,7 +467,10 @@ for itn in range(NL_SOLVER_MAXITER+1):
         b = assemble(dualStep)
         PETSc.Sys.Print("Norm b = ", norm(b))
         solve(Md, S_step.vector(), b, solver_parameters={"ksp_monitor_true_residual": None, 
-                                                         "ksp_type": "preonly", "pc_type":"lu"})
+                                                         "ksp_type": "fgmres",
+                                                         "pc_type": "jacobi", 
+                                                         "ksp_error_if_not_converged": 1})
+        PETSc.Sys.Print("AFter solve")
         Abstract.Vector.scale(step, -1.0)
 
     # compute the norm of the gradient
