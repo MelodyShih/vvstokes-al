@@ -21,6 +21,7 @@ import Abstract.Vector
 import copy
 import argparse
 import numpy as np
+import tracemalloc
 
 PETSc.Sys.popErrorHandler()
 import gc
@@ -90,7 +91,7 @@ MONITOR_NL_ITER=True
 MONITOR_NL_STEPSEARCH=False
 NL_SOLVER_GRAD_RTOL = 1e-8
 NL_SOLVER_GRAD_STEP_RTOL = 1e-8
-NL_SOLVER_MAXITER = 0
+NL_SOLVER_MAXITER = 2
 NL_SOLVER_STEP_MAXITER = 15
 NL_SOLVER_STEP_ARMIJO    = 1.0e-4
 
@@ -113,7 +114,8 @@ if quad:
     ## land_quad_finer_finer: 0.25, 14
     #basemesh = Mesh('mesh/land_quad_simple.msh')
     #basemesh = Mesh('mesh/land_quad_simple_twodomain.msh')
-    basemesh = Mesh('mesh/land_quad.msh')
+    #basemesh = Mesh('mesh/land_quad.msh')
+    basemesh = Mesh('mesh/land.msh')
     #basemesh = Mesh('mesh/land_finer.msh')
     PETSc.Sys.Print("basemesh contains %d cells" % basemesh.num_cells())
     vvstokesprob.Lz = 0.25
@@ -303,21 +305,23 @@ else:
 #                                                  visc_lower)
 # viscosity field from linearization of the newton systems
 uII = WeakForm.strainrateII(sol_u)
-#mu = Constant(VISC_REG) + Min(visc_upper,0.5*yield_strength/uII)
-mu = visc_upper*yield_strength/(2*uII*visc_upper + yield_strength) 
+mu = Constant(VISC_REG) + Min(visc_upper,0.5*yield_strength/uII)
+#mu = visc_upper*yield_strength/(2*uII*visc_upper + yield_strength) 
 
 #======================================
 # Solve the nonlinear problem
 #======================================
 # initialize solution
 #TODO add stablization term for hdiv discretisation
+PETSc.Log.begin()
+tracemalloc.start()
 (a,l) = WeakForm.linear_stokes(rhs, VQ, visc_upper, dx, dx_upper,
                                visc_lower, dx_lower, visc_middle, dx_middle)
 
 vvstokessolver = VariableViscosityStokesSolver(vvstokesprob, 
                                                "almg", 
                                                args.case,
-                                               10,
+                                               1000,
                                                args.asmbackend)
 for i in range(2):
     vvstokesprob.set_linearvariationalproblem(a, l, sol, bcs)
@@ -325,6 +329,8 @@ for i in range(2):
     vvstokessolver.set_transfers()
     vvstokessolver.solve()
 gc.collect()
+current, peak = tracemalloc.get_traced_memory()
+print(f"Current memory usage is {current / 10**6}MB; Peak was {peak / 10**6}MB")
 
 ## uncomment to compare solutions between augmented/unaugmented sys
 #solve(a==l, sol, bcs)
@@ -419,10 +425,9 @@ for itn in range(NL_SOLVER_MAXITER+1):
                   solver_parameters={"ksp_monitor_true_residual": None, 
                                      "ksp_type": "preonly", "pc_type":"lu"})
 
-    PETSc.Log.begin()
     # assemble linearized system
-    stagetest = PETSc.Log.Stage("NewtonLinearization")
-    stagetest.push()
+    #stagetest = PETSc.Log.Stage("NewtonLinearization")
+    #stagetest.push()
     Abstract.Vector.setZero(step)
     vvstokesprob.set_bcsfun(bcstep_fun)
     bcs_step = vvstokesprob.get_bcs(mesh)
@@ -442,11 +447,14 @@ for itn in range(NL_SOLVER_MAXITER+1):
     #else:
     #    vvstokessolver.set_transfers(transfers=transfers)
     vvstokessolver.solve()
-    stagetest.pop()
+    #stagetest.pop()
     PETSc.Log.view()
     lin_it=vvstokessolver.get_iterationnum()
     lin_it_total += lin_it
     gc.collect()
+    
+    current, peak = tracemalloc.get_traced_memory()
+    print(f"Current memory usage is {current / 10**6}MB; Peak was {peak / 10**6}MB")
     
     ## uncomment to compare solutions between augmented/unaugmented sys
     #solve(hess == grad, step, bcs_step)
@@ -522,6 +530,7 @@ PETSc.Sys.Print("%s: #iter %i, ||g|| reduction %3e, (grad,step) reduction %3e, #
         lin_it_total
     )
 )
+tracemalloc.stop()
 
 #======================================
 # Output
