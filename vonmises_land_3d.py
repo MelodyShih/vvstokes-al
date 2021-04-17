@@ -90,12 +90,12 @@ MONITOR_NL_ITER=True
 MONITOR_NL_STEPSEARCH=False
 NL_SOLVER_GRAD_RTOL = 1e-8
 NL_SOLVER_GRAD_STEP_RTOL = 1e-8
-NL_SOLVER_MAXITER = 0
+NL_SOLVER_MAXITER = 100
 NL_SOLVER_STEP_MAXITER = 15
 NL_SOLVER_STEP_ARMIJO    = 1.0e-4
 
 # output
-OUTPUT_VTK=False
+OUTPUT_VTK=True
 #======================================
 # Setup VariableViscosityStokesProblem
 #======================================
@@ -419,10 +419,10 @@ for itn in range(NL_SOLVER_MAXITER+1):
                   solver_parameters={"ksp_monitor_true_residual": None, 
                                      "ksp_type": "preonly", "pc_type":"lu"})
 
-    PETSc.Log.begin()
+    #PETSc.Log.begin()
     # assemble linearized system
-    stagetest = PETSc.Log.Stage("NewtonLinearization")
-    stagetest.push()
+    #stagetest = PETSc.Log.Stage("NewtonLinearization")
+    #stagetest.push()
     Abstract.Vector.setZero(step)
     vvstokesprob.set_bcsfun(bcstep_fun)
     bcs_step = vvstokesprob.get_bcs(mesh)
@@ -442,8 +442,8 @@ for itn in range(NL_SOLVER_MAXITER+1):
     #else:
     #    vvstokessolver.set_transfers(transfers=transfers)
     vvstokessolver.solve()
-    stagetest.pop()
-    PETSc.Log.view()
+    #stagetest.pop()
+    #PETSc.Log.view()
     lin_it=vvstokessolver.get_iterationnum()
     lin_it_total += lin_it
     gc.collect()
@@ -539,7 +539,7 @@ if OUTPUT_VTK:
     edotp_t = TestFunction(Vd1)
     solve(inner(edotp_t, (edotp - strainrateII))*dx == 0.0, edotp)
     Abstract.Vector.scale(edotp, REF_STRAIN_RATE)
-    File("/scratch1/04841/tg841407/stokes_2021-02-10/vtk/land3d_large_strainrateII.pvd").write(edotp)
+    File("/scratch1/04841/tg841407/stokes_2021-02-10/vtk/land3d_large_strainrateII"+str(nref)+".pvd", project_output=True).write(edotp)
 
     Vd1 = FunctionSpace(mesh, "DG", 0)
     edotp   = Function(Vd1)
@@ -547,7 +547,7 @@ if OUTPUT_VTK:
     solve((inner(edotp_t, (edotp - visceff))*dx_upper+ \
            inner(edotp_t, (edotp - visc_lower))*dx_lower+ \
            inner(edotp_t, (edotp - visc_middle))*dx_middle) == 0.0, edotp)
-    File("/scratch1/04841/tg841407/stokes_2021-02-10/vtk/land3d_large_visceff.pvd").write(edotp)
+    File("/scratch1/04841/tg841407/stokes_2021-04-16/vtk/land3d_large_visceff"+str(nref)+".pvd",project_output=True).write(edotp)
 
-    File("/scratch1/04841/tg841407/stokes_2021-02-10/vtk/land3d_large_solution_u.pvd").write(sol_u)
-    File("/scratch1/04841/tg841407/stokes_2021-02-10/vtk/land3d_large_solution_p.pvd").write(sol_p)
+    File("/scratch1/04841/tg841407/stokes_2021-04-16/vtk/land3d_large_solution_u"+str(nref)+".pvd",project_output=True).write(sol_u)
+    File("/scratch1/04841/tg841407/stokes_2021-04-16/vtk/land3d_large_solution_p"+str(nref)+".pvd",project_output=True).write(sol_p)
