@@ -17,6 +17,7 @@ from balance import load_balance, rebalance
 import star
 
 import numpy as np
+from pympler import asizeof
 
 class VariableViscosityStokesProblem():
     def create_basemesh(self,basemeshtype,Nx=-1, Ny=-1, Nz=-1, 
@@ -376,7 +377,13 @@ class VariableViscosityStokesSolver():
         for level in range(self.problem.nref+1):
             levelmesh = mh[level]
             Wlevel = self.problem.get_W_mat(levelmesh,case,w,level=level)
+            PETSc.Sys.Print("[Mem] Size of W matrix on level %d:" % level)
+            PETSc.Sys.Print("[Mem]    ", asizeof.asized(Wlevel, detail=1).format())
+            PETSc.Sys.Print("[Mem]    info: memory ", Wlevel.getInfo(2)['memory'])
             BBClevel = self.problem.get_B_mat(levelmesh)
+            PETSc.Sys.Print("[Mem] Size of B matrix on level %d:" % level)
+            PETSc.Sys.Print("[Mem]    ", asizeof.asized(BBClevel, detail=1).format())
+            PETSc.Sys.Print("[Mem]    info: memory ", BBClevel.getInfo(2)['memory'])
             Wlevel *= gamma
             if level in BBCTW_dict:
                 BBCTWlevel = BBClevel.transposeMatMult(Wlevel, 
@@ -397,7 +404,11 @@ class VariableViscosityStokesSolver():
 
         self.BBCTWB_dict = BBCTWB_dict
         self.BBCTW_dict = BBCTW_dict 
-        PETSc.Sys.Print("Computed BTWB products")
+        PETSc.Sys.Print("[Mem] Size of BBCTWB dict:")
+        PETSc.Sys.Print("[Mem]    ", asizeof.asized(self.BBCTWB_dict, detail=1).format())
+        PETSc.Sys.Print("[Mem] Size of BBCTW dict:")
+        PETSc.Sys.Print("[Mem]    ", asizeof.asized(self.BBCTW_dict, detail=1).format())
+        PETSc.Sys.Print("[Info] Computed BTWB products")
         
     def set_transfers(self, transfers=None):
         if transfers is None and self.solver_type == "almg"\
@@ -552,7 +563,7 @@ class VariableViscosityStokesSolver():
                 "mg_coarse_pc_type": "python",
                 "mg_coarse_pc_python_type": "firedrake.AssembledPC",
                 "mg_coarse_assembled_pc_type": "lu",
-                "mg_coarse_assembled_pc_factor_mat_solver_type": "superlu_dist",
+                "mg_coarse_assembled_pc_factor_mat_solver_type": "mumps",
                 #"mg_coarse_ksp_monitor_true_residual": None,
             }
 
