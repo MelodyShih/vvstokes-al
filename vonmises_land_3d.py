@@ -303,8 +303,8 @@ else:
 #                                                  visc_lower)
 # viscosity field from linearization of the newton systems
 uII = WeakForm.strainrateII(sol_u)
-#mu = Constant(VISC_REG) + Min(visc_upper,0.5*yield_strength/uII)
-mu = visc_upper*yield_strength/(2*uII*visc_upper + yield_strength) 
+mu = Constant(VISC_REG) + Min(visc_upper,0.5*yield_strength/uII)
+#mu = visc_upper*yield_strength/(2*uII*visc_upper + yield_strength) 
 
 #======================================
 # Solve the nonlinear problem
