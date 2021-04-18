@@ -95,7 +95,7 @@ NL_SOLVER_STEP_MAXITER = 15
 NL_SOLVER_STEP_ARMIJO    = 1.0e-4
 
 # output
-OUTPUT_VTK=True
+OUTPUT_VTK=False
 #======================================
 # Setup VariableViscosityStokesProblem
 #======================================
@@ -373,7 +373,8 @@ step_length  = 0.0
 # assemble mass matrices
 if args.linearization == 'stressvel':
     Md = assemble(Abstract.WeakForm_Phi.mass(Vd), mat_type='baij')
-    Mdmat = Md.petscmat
+    Mdinv = assemble(Tensor(Abstract.WeakForm_Phi.mass(Vd)).inv).petscmat
+    #Mdmat = Md.petscmat
     #viewer = PETSc.Viewer().createASCII("Md.txt")
     #viewer.pushFormat(PETSc.Viewer.Format.ASCII_DENSE)
     #PETSc.Sys.Print("Start writing matrix")
@@ -414,10 +415,13 @@ for itn in range(NL_SOLVER_MAXITER+1):
             # project S to unit sphere
             Sprojweak = WeakForm.hessian_dualUpdate_boundMaxMagnitude(S, Vd, 1.0)
             b = assemble(Sprojweak)
+            with assemble(Sprojweak).dat.vec_ro as v:
+                with S_proj.dat.vec as sproj:
+                    Mdinv.mult(v, sproj)
             PETSc.Sys.Print("solve 1")
-            solve(Md, S_proj.vector(), b, 
-                  solver_parameters={"ksp_monitor_true_residual": None, 
-                                     "ksp_type": "preonly", "pc_type":"lu"})
+            #solve(Md, S_proj.vector(), b, 
+            #      solver_parameters={"ksp_monitor_true_residual": None, 
+            #                         "ksp_type": "preonly", "pc_type":"lu"})
 
     #PETSc.Log.begin()
     # assemble linearized system
@@ -466,10 +470,14 @@ for itn in range(NL_SOLVER_MAXITER+1):
         Abstract.Vector.scale(step, -1.0)
         b = assemble(dualStep)
         PETSc.Sys.Print("Norm b = ", norm(b))
-        solve(Md, S_step.vector(), b, solver_parameters={"ksp_monitor_true_residual": None, 
-                                                         "ksp_type": "fgmres",
-                                                         "pc_type": "jacobi", 
-                                                         "ksp_error_if_not_converged": 1})
+        with assemble(dualStep).dat.vec_ro as v:
+            with S_step.dat.vec as sstep:
+                Mdinv.mult(v, sstep)
+        PETSc.Sys.Print(norm(S_step))
+        #solve(Md, S_step.vector(), b, solver_parameters={"ksp_monitor_true_residual": None, 
+        #                                                 "ksp_type": "fgmres",
+        #                                                 "pc_type": "jacobi", 
+        #                                                 "ksp_error_if_not_converged": 1})
         PETSc.Sys.Print("AFter solve")
         Abstract.Vector.scale(step, -1.0)
 
