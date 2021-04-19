@@ -21,6 +21,7 @@ import Abstract.Vector
 import copy
 import argparse
 import numpy as np
+#import tracemalloc
 
 PETSc.Sys.popErrorHandler()
 import gc
@@ -114,6 +115,7 @@ if quad:
     #basemesh = Mesh('mesh/land_quad_simple.msh')
     #basemesh = Mesh('mesh/land_quad_simple_twodomain.msh')
     basemesh = Mesh('mesh/land_quad.msh')
+    #basemesh = Mesh('mesh/land.msh')
     #basemesh = Mesh('mesh/land_finer.msh')
     PETSc.Sys.Print("basemesh contains %d cells" % basemesh.num_cells())
     vvstokesprob.Lz = 0.25
@@ -311,13 +313,15 @@ mu = Constant(VISC_REG) + Min(visc_upper,0.5*yield_strength/uII)
 #======================================
 # initialize solution
 #TODO add stablization term for hdiv discretisation
+#PETSc.Log.begin()
+#tracemalloc.start()
 (a,l) = WeakForm.linear_stokes(rhs, VQ, visc_upper, dx, dx_upper,
                                visc_lower, dx_lower, visc_middle, dx_middle)
 
 vvstokessolver = VariableViscosityStokesSolver(vvstokesprob, 
                                                "almg", 
                                                args.case,
-                                               10,
+                                               1000,
                                                args.asmbackend)
 for i in range(2):
     vvstokesprob.set_linearvariationalproblem(a, l, sol, bcs)
@@ -325,6 +329,8 @@ for i in range(2):
     vvstokessolver.set_transfers()
     vvstokessolver.solve()
 gc.collect()
+#current, peak = tracemalloc.get_traced_memory()
+#print(f"Current memory usage is {current / 10**6}MB; Peak was {peak / 10**6}MB")
 
 ## uncomment to compare solutions between augmented/unaugmented sys
 #solve(a==l, sol, bcs)
@@ -383,7 +389,7 @@ if args.linearization == 'stressvel':
 
 if MONITOR_NL_ITER:
     PETSc.Sys.Print('{0:<3} "{1:>6}"{2:^20}{3:^14}{4:^15}{5:^10}'.format(
-          "Itn", vvstokessolver.solver_type, "Energy", "||g||_l2", 
+          "Itn", args.solver_type, "Energy", "||g||_l2", 
            "(grad,step)", "step len"))
 
 for itn in range(NL_SOLVER_MAXITER+1):
@@ -452,6 +458,9 @@ for itn in range(NL_SOLVER_MAXITER+1):
     lin_it_total += lin_it
     gc.collect()
     
+    #current, peak = tracemalloc.get_traced_memory()
+    #print(f"Current memory usage is {current / 10**6}MB; Peak was {peak / 10**6}MB")
+    
     ## uncomment to compare solutions between augmented/unaugmented sys
     #solve(hess == grad, step, bcs_step)
     #PETSc.Sys.Print("abstepute diff in vel:",\
@@ -469,16 +478,13 @@ for itn in range(NL_SOLVER_MAXITER+1):
     if args.linearization == 'stressvel':
         Abstract.Vector.scale(step, -1.0)
         b = assemble(dualStep)
-        PETSc.Sys.Print("Norm b = ", norm(b))
         with assemble(dualStep).dat.vec_ro as v:
             with S_step.dat.vec as sstep:
                 Mdinv.mult(v, sstep)
-        PETSc.Sys.Print(norm(S_step))
         #solve(Md, S_step.vector(), b, solver_parameters={"ksp_monitor_true_residual": None, 
         #                                                 "ksp_type": "fgmres",
         #                                                 "pc_type": "jacobi", 
         #                                                 "ksp_error_if_not_converged": 1})
-        PETSc.Sys.Print("AFter solve")
         Abstract.Vector.scale(step, -1.0)
 
     # compute the norm of the gradient
@@ -530,6 +536,7 @@ PETSc.Sys.Print("%s: #iter %i, ||g|| reduction %3e, (grad,step) reduction %3e, #
         lin_it_total
     )
 )
+#tracemalloc.stop()
 
 #======================================
 # Output
