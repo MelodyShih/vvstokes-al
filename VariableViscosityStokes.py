@@ -379,11 +379,13 @@ class VariableViscosityStokesSolver():
             Wlevel = self.problem.get_W_mat(levelmesh,case,w,level=level)
             PETSc.Sys.Print("[Mem] Size of W matrix on level %d:" % level)
             PETSc.Sys.Print("[Mem]    ", asizeof.asized(Wlevel, detail=1).format())
-            PETSc.Sys.Print("[Mem]    info: memory ", Wlevel.getInfo(2)['memory'])
+            PETSc.Sys.Print("[Mem]    info: global memory ", Wlevel.getInfo(2)['memory'])
+            PETSc.Sys.Print("[Mem]    info: global nz allocated ", Wlevel.getInfo(2)['nz_allocated'])
             BBClevel = self.problem.get_B_mat(levelmesh)
             PETSc.Sys.Print("[Mem] Size of B matrix on level %d:" % level)
             PETSc.Sys.Print("[Mem]    ", asizeof.asized(BBClevel, detail=1).format())
-            PETSc.Sys.Print("[Mem]    info: memory ", BBClevel.getInfo(2)['memory'])
+            PETSc.Sys.Print("[Mem]    info: global memory ", BBClevel.getInfo(2)['memory'])
+            PETSc.Sys.Print("[Mem]    info: global nz allocated ", BBClevel.getInfo(2)['nz_allocated'])
             Wlevel *= gamma
             if level in BBCTW_dict:
                 BBCTWlevel = BBClevel.transposeMatMult(Wlevel, 
@@ -391,6 +393,10 @@ class VariableViscosityStokesSolver():
             else:
                 BBCTWlevel = BBClevel.transposeMatMult(Wlevel)
                 BBCTW_dict[level] = BBCTWlevel
+                PETSc.Sys.Print("[Mem] Size of BBCTW matrix on level %d:" % level)
+                PETSc.Sys.Print("[Mem]    ", asizeof.asized(BBCTW_dict[level], detail=1).format())
+                PETSc.Sys.Print("[Mem]    info: global memory ",BBCTW_dict[level].getInfo(2)['memory'])
+                PETSc.Sys.Print("[Mem]    info: global nz allocated ",BBCTW_dict[level].getInfo(2)['nz_allocated'])
             #if level in BBCTWB_dict:
             #    BBCTWBlevel = BBCTWlevel.matMult(BBClevel, 
             #                                     result=BBCTWB_dict[level])
@@ -399,8 +405,16 @@ class VariableViscosityStokesSolver():
             #    BBCTWB_dict[level] = BBCTWBlevel
             if level in BBCTWB_dict:
                 BBCTWBlevel = Wlevel.PtAP(BBClevel, result=BBCTWB_dict[level])
+                PETSc.Sys.Print("[Mem] Size of BBCTWB matrix on level %d:" % level)
+                PETSc.Sys.Print("[Mem]    ", asizeof.asized(BBCTWBlevel, detail=1).format())
+                PETSc.Sys.Print("[Mem]    info: global memory ", BBCTWBlevel.getInfo(2)['memory'])
+                PETSc.Sys.Print("[Mem]    info: global nz allocated ", BBCTWBlevel.getInfo(2)['nz_allocated'])
             else:
                 BBCTWB_dict[level] = Wlevel.PtAP(BBClevel)
+                PETSc.Sys.Print("[Mem] Size of BBCTWB matrix on level %d:" % level)
+                PETSc.Sys.Print("[Mem]    ", asizeof.asized(BBCTWB_dict[level], detail=1).format())
+                PETSc.Sys.Print("[Mem]    info: global memory ",BBCTWB_dict[level].getInfo(2)['memory'])
+                PETSc.Sys.Print("[Mem]    info: global nz allocated ",BBCTWB_dict[level].getInfo(2)['nz_allocated'])
 
         self.BBCTWB_dict = BBCTWB_dict
         self.BBCTW_dict = BBCTW_dict 
