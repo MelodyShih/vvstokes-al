@@ -332,8 +332,13 @@ class VariableViscosityStokesProblem():
         u, p = TrialFunctions(Z)
         v, q = TestFunctions(Z)
         bcs = self.get_bcs(mesh)
-        BBC = assemble(-q * div(u) * dx(degree=divdegree),\
-                   bcs=bcs,mat_type='nest').petscmat.getNestSubMatrix(1, 0)
+
+        M = assemble(-q * div(u) * dx(degree=divdegree),\
+                   bcs=bcs,mat_type='nest').petscmat
+        M.getNestSubMatrix(0, 0).destroy()
+        M.getNestSubMatrix(0, 1).destroy()
+        M.getNestSubMatrix(1, 1).destroy()
+        BBC = M.getNestSubMatrix(1, 0)
         return BBC
 
     def set_linearvariationalproblem(self, a, l, z, bcs):
@@ -470,6 +475,7 @@ class VariableViscosityStokesSolver():
             transfermanager = TransferManager(native_transfers=transfers)
             self.transfers = transfers
             self.lvsolver.set_transfer_manager(transfermanager)
+            self.vtransfer = vtransfer
         elif transfers is None:
             V, Q = self.problem.get_functionspace(self.problem.mesh)
             qtransfer = NullTransfer()
@@ -729,8 +735,26 @@ class VariableViscosityStokesSolver():
         self.BBCTW_dict = None
         self.lvsolver = None
         self.precond_mulist = None
+        self.vtransfer = None
 
         ## default setup
         if setBTWBdics is True:
             self.set_BTWB_dicts()
         self.set_parameters()
+
+    def destroy(self):
+        import gc
+        PETSc.Sys.Print("Calling manual destroys")
+        self.lvsolver._ctx._pjac.petscmat.destroy()
+        self.lvsolver._ctx._jac.petscmat.destroy()
+        self.lvsolver.snes.destroy()
+        tm = self.vtransfer
+        if tm is not None:
+            for k in tm.tensors.keys():
+                A, _, BTWB = tm.tensors[k]
+                A.petscmat.destroy()
+                BTWB.destroy()
+            for k in tm.solver.keys():
+                tm.solver[k].ksp.destroy()
+        PETSc.Sys.Print("Done with manual destroys")
+        gc.collect()

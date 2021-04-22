@@ -328,6 +328,7 @@ def main():
             sum = summary.summarize(allObjects)
             summary.print_(sum)
     
+    vvstokessolver.destroy()
     
     ## uncomment to compare solutions between augmented/unaugmented sys
     #solve(a==l, sol, bcs)
@@ -438,6 +439,7 @@ def main():
     
         lin_it=vvstokessolver.get_iterationnum()
         lin_it_total += lin_it
+        vvstokessolver.destroy()
         
         ## uncomment to compare solutions between augmented/unaugmented sys
         #solve(hess == grad, step, bcs_step)
