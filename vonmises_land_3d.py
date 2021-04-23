@@ -21,11 +21,10 @@ import Abstract.Vector
 import copy
 import argparse
 import numpy as np
-#import tracemalloc
 
 PETSc.Sys.popErrorHandler()
-import gc
-gc.disable()
+#import gc
+#gc.disable()
 
 #import logging
 #logging.basicConfig(level="INFO")
@@ -44,7 +43,7 @@ parser.add_argument("--itref", type=int, default=0)
 parser.add_argument("--case", type=int, default=3)
 parser.add_argument("--discretisation", type=str, default="hdiv")
 parser.add_argument("--quad", dest="quad", default=False, action="store_true")
-parser.add_argument("--quad-deg", type=int, dest="quad_deg", default=20)
+parser.add_argument("--quad-deg", type=int, dest="quad_deg", default=40)
 parser.add_argument("--rebalance", dest="rebalance", default=False, action="store_true")
 parser.add_argument("--asmbackend", type=str, choices=['tinyasm', 'petscasm'], 
                                                              default="tinyasm")
@@ -91,7 +90,7 @@ MONITOR_NL_ITER=True
 MONITOR_NL_STEPSEARCH=False
 NL_SOLVER_GRAD_RTOL = 1e-8
 NL_SOLVER_GRAD_STEP_RTOL = 1e-8
-NL_SOLVER_MAXITER = 100
+NL_SOLVER_MAXITER = 200
 NL_SOLVER_STEP_MAXITER = 15
 NL_SOLVER_STEP_ARMIJO    = 1.0e-4
 
@@ -122,17 +121,18 @@ if quad:
     vvstokesprob.Nz = 3 #3  #8 (finer)
     vvstokesprob.set_meshhierarchy(basemesh, nref, rebal=rebalance)
     #sdl = [5, 6, 7, 4, 2, 3] #dx_upper, dx_middle, dx_lower
-                             #face_y=0, face_x=0, face_x=4
+                              #face_y=0, face_x=0, face_x=4
     #sdl = [5, -1, 6, 3, 1, 2]
     sdl = [2, 3, 1, 6, 4, 5]
 
     mesh = vvstokesprob.get_mesh()
     mh = vvstokesprob.get_meshhierarchy()
     dx_upper  = Measure("dx", domain=mesh, subdomain_id=sdl[0])
-    #dx_middle  = None
     dx_middle = Measure("dx", domain=mesh, subdomain_id=sdl[1])
     dx_lower  = Measure("dx", domain=mesh, subdomain_id=sdl[2])
     dx = Measure("dx", domain=mesh, subdomain_id="everywhere")
+
+    dx = dx(degree=deg)
     dx_upper  = dx_upper(degree=deg)
     dx_middle = dx_middle(degree=deg)
     dx_lower  = dx_lower(degree=deg)
@@ -150,6 +150,12 @@ else:
     dx_middle = Measure("dx", domain=mesh, subdomain_id=sdl[1])
     dx_lower  = Measure("dx", domain=mesh, subdomain_id=sdl[2])
     dx = Measure("dx", domain=mesh, subdomain_id="everywhere")
+
+    dx = dx(degree=deg)
+    dx_upper  = dx_upper(degree=deg)
+    dx_middle = dx_middle(degree=deg)
+    dx_lower  = dx_lower(degree=deg)
+
 #vvstokesprob.set_measurelist([dx_upper, dx_lower])
 vvstokesprob.set_measurelist([dx])
 
@@ -159,7 +165,7 @@ vvstokesprob.set_measurelist([dx])
 mesh = vvstokesprob.get_mesh()
 mh = vvstokesprob.get_meshhierarchy()
 
-V, Q, Vd = vvstokesprob.get_functionspace(mesh,info=True, dualFncSp=True)
+V, Q, Vd = vvstokesprob.get_functionspace(mesh,info=True,dualFncSp=True)
 VQ = V*Q
 
 from sparsity import cache_sparsity
@@ -193,7 +199,6 @@ def bc_fun(mesh):
         bc_wall_y    = DirichletBC(VQ.sub(0).sub(1), 0.0, sub_domain=sdl[5]) 
         bc_left      = DirichletBC(VQ.sub(0), vel_inflow_left , sub_domain=sdl[6])
         bc_right     = DirichletBC(VQ.sub(0), vel_inflow_right, sub_domain=sdl[7])
-    #bc_outflow  = DirichletBC(VQ.sub(1), 0.0       , sub_domain=4)
     bcs = [bc_left, bc_right, bc_wall_z1, bc_wall_z2, bc_wall_y]
     return bcs
 
@@ -299,38 +304,26 @@ elif args.linearization == 'stressvel':
 else:
     raise ValueError("unknown type of linearization %s" % args.linearization)
 
-# preconditioner viscosity
-#previsc1expr, previsc2expr = WeakForm.precondvisc(sol_u, sol_p, VQ, visc_upper, 
-#                                                  VISC_REG, yield_strength, 
-#                                                  visc_lower)
-# viscosity field from linearization of the newton systems
-uII = WeakForm.strainrateII(sol_u)
-mu = Constant(VISC_REG) + Min(visc_upper,0.5*yield_strength/uII)
-#mu = visc_upper*yield_strength/(2*uII*visc_upper + yield_strength) 
-
 #======================================
 # Solve the nonlinear problem
 #======================================
 # initialize solution
 #TODO add stablization term for hdiv discretisation
 #PETSc.Log.begin()
-#tracemalloc.start()
 (a,l) = WeakForm.linear_stokes(rhs, VQ, visc_upper, dx, dx_upper,
                                visc_lower, dx_lower, visc_middle, dx_middle)
 
 vvstokessolver = VariableViscosityStokesSolver(vvstokesprob, 
                                                "almg", 
                                                args.case,
-                                               1000,
+                                               10,
                                                args.asmbackend)
 for i in range(2):
     vvstokesprob.set_linearvariationalproblem(a, l, sol, bcs)
     vvstokessolver.set_linearvariationalsolver()
     vvstokessolver.set_transfers()
     vvstokessolver.solve()
-gc.collect()
-#current, peak = tracemalloc.get_traced_memory()
-#print(f"Current memory usage is {current / 10**6}MB; Peak was {peak / 10**6}MB")
+#gc.collect()
 
 ## uncomment to compare solutions between augmented/unaugmented sys
 #solve(a==l, sol, bcs)
@@ -345,8 +338,8 @@ gc.collect()
 #       norm(sol.split()[1]-sol2.split()[1])\
 #       /norm(sol.split()[1]))
 
-#vvstokessolver.set_precondviscosity([mu])
 def visc_fun_nonlinear(mesh, level=nref):
+    PETSc.Sys.Print("Setting viscosity on level: ", level)
     _, finelevel = get_level(sol_u.ufl_domain())
     if level == finelevel:
         uII = WeakForm.strainrateII(sol_u)
@@ -359,9 +352,10 @@ def visc_fun_nonlinear(mesh, level=nref):
     
         uII = WeakForm.strainrateII(levelsol_u)
 
+    # Comp rheo
     #mu = visc_upper*yield_strength/(2*uII*visc_upper + yield_strength) 
+    # Ideal rheo
     mu = Constant(VISC_REG) + Min(visc_upper, 0.5*yield_strength/uII)
-    #mu = WeakForm.precondvisc(sol_u, sol_p, visc_upper, VISC_REG, yield_strength, visc2=None)
     return mu
 vvstokesprob.set_viscosity(visc_fun_nonlinear) #used for W
 
@@ -424,7 +418,6 @@ for itn in range(NL_SOLVER_MAXITER+1):
             with assemble(Sprojweak).dat.vec_ro as v:
                 with S_proj.dat.vec as sproj:
                     Mdinv.mult(v, sproj)
-            PETSc.Sys.Print("solve 1")
             #solve(Md, S_proj.vector(), b, 
             #      solver_parameters={"ksp_monitor_true_residual": None, 
             #                         "ksp_type": "preonly", "pc_type":"lu"})
@@ -443,7 +436,6 @@ for itn in range(NL_SOLVER_MAXITER+1):
                                                    args.case,
                                                    args.gamma,
                                                    args.asmbackend)
-    #vvstokessolver.set_precondviscosity([mu]) #Schur complement approx
     vvstokessolver.set_linearvariationalsolver()
     vvstokessolver.set_transfers()
     #if itn == 0:
@@ -456,10 +448,7 @@ for itn in range(NL_SOLVER_MAXITER+1):
     #PETSc.Log.view()
     lin_it=vvstokessolver.get_iterationnum()
     lin_it_total += lin_it
-    gc.collect()
-    
-    #current, peak = tracemalloc.get_traced_memory()
-    #print(f"Current memory usage is {current / 10**6}MB; Peak was {peak / 10**6}MB")
+    #gc.collect()
     
     ## uncomment to compare solutions between augmented/unaugmented sys
     #solve(hess == grad, step, bcs_step)
@@ -527,16 +516,16 @@ for itn in range(NL_SOLVER_MAXITER+1):
     #Abstract.Vector.scale(edotp, REF_STRAIN_RATE)
     #File("/scratch1/04841/tg841407/stokes_2021-03-04/vtk/land3d_iter"+str(itn)+".pvd").write(edotp)
 
-PETSc.Sys.Print("%s: #iter %i, ||g|| reduction %3e, (grad,step) reduction %3e, #total linear iter %i." % \
-    (
-        args.linearization,
-        itn,
-        g_norm/g_norm_init,
-        np.abs(angle_grad_step/angle_grad_step_init),
-        lin_it_total
+if NL_SOLVER_MAXITER > 0:
+    PETSc.Sys.Print("%s: #iter %i, ||g|| reduction %3e, (grad,step) reduction %3e, #total linear iter %i." % \
+        (
+            args.linearization,
+            itn,
+            g_norm/g_norm_init,
+            np.abs(angle_grad_step/angle_grad_step_init),
+            lin_it_total
+        )
     )
-)
-#tracemalloc.stop()
 
 #======================================
 # Output
