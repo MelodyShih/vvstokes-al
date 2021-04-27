@@ -1,4 +1,5 @@
 from firedrake import *
+from memory_profiler import profile
 
 class DGMassInv(PCBase):
 
@@ -30,24 +31,24 @@ class DGMassInv(PCBase):
         self.gamma = gamma
 
         if case == 0:
-            massinv = assemble(Tensor(inner(u, v)*dx).inv)
+            massinv = assemble(Tensor(inner(u, v)*dx(degree=deg)).inv)
             self.massinv = massinv.petscmat
             self.scale = nu_fun.copy(deepcopy=True)
             self.scale = Function(V).project(-(1.0+gamma))
         elif case == 1:
-            massinv = assemble(Tensor(inner(u, v)*dx).inv)
+            massinv = assemble(Tensor(inner(u, v)*dx(degree=deg)).inv)
             self.massinv = massinv.petscmat
             nu_fun = Function(V).interpolate(nu_expr)
             self.scale.project(-(nu_fun+gamma))
         elif case == 2:
-            massinv = assemble(Tensor(inner(u, v)*dx).inv)
+            massinv = assemble(Tensor(inner(u, v)*dx(degree=deg)).inv)
             self.massinv = massinv.petscmat
             self.scale = Function(V).project(-(sqrt(dr)+gamma))
         elif case == 3 or case == 4:
             weak = -1.0/nu_expr*inner(u,v)*dx(degree=deg)
             viscmassinv = assemble(Tensor(weak).inv)
 
-            massinv = assemble(Tensor(inner(u, v)*dx).inv)
+            massinv = assemble(Tensor(inner(u, v)*dx(degree=deg)).inv)
             self.viscmassinv = viscmassinv.petscmat
             self.massinv = massinv.petscmat
             self.scale = Function(V).project(-gamma)
@@ -101,5 +102,16 @@ class DGMassInv(PCBase):
             self.viscmassinv.multAdd(-x,tmp3,y)
         else:
             raise ValueError("Unknown type of preconditioner %i" % case)
+
     def applyTranspose(self, pc, x, y):
         raise NotImplementedError("Sorry!")
+
+    def destroy(self, pc):
+        if self.viscmassinv is not None:
+            PETSc.Sys.Print("[mem] local viscmassinv size",
+                              self.viscmassinv.getInfo(1)['memory'])
+            self.viscmassinv.destroy()
+        if self.massinv is not None:
+            PETSc.Sys.Print("[mem] local massinv size",
+                              self.massinv.getInfo(1)['memory'])
+            self.massinv.destroy()
