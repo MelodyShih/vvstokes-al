@@ -21,6 +21,7 @@ import Abstract.Vector
 import copy
 import argparse
 import numpy as np
+import gc
 from pympler import summary
 from pympler import muppy
 
@@ -37,7 +38,8 @@ PETSc.Sys.popErrorHandler()
 # Parsing input arguments
 #======================================
 
-@profile
+fp=open("main.log",'w+')
+@profile(stream=fp)
 def main():
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--nref", type=int, default=1)
@@ -66,7 +68,6 @@ def main():
     rebalance = args.rebalance
     
     #firedrake.disable_performance_optimisations()
-    firedrake.parameters["quadrature_degree"]=deg
     
     #======================================
     # Parameters
@@ -86,9 +87,9 @@ def main():
     REF_STRAIN_RATE = REF_VELOCITY*YEAR_PER_SEC/REF_HEIGHT
     REF_STRESS_RATE = 2.0*REF_STRAIN_RATE*REF_VISCOSITY
     
-    VISC_UPPER_SCALED   = 1.e24/REF_VISCOSITY
+    VISC_UPPER_SCALED   = 1.e22/REF_VISCOSITY
     VISC_MIDDLE_SCALED  = 1.e21/REF_VISCOSITY
-    VISC_LOWER_SCALED   = 1.e17/REF_VISCOSITY
+    VISC_LOWER_SCALED   = 1.e20/REF_VISCOSITY
     BOUNDARY_INFLOW_VELOCITY = 1.0
     
     # nolinear solver parameters
@@ -96,14 +97,15 @@ def main():
     MONITOR_NL_STEPSEARCH=False
     NL_SOLVER_GRAD_RTOL = 1e-8
     NL_SOLVER_GRAD_STEP_RTOL = 1e-8
-    NL_SOLVER_MAXITER = 0
+    NL_SOLVER_MAXITER = 1
     NL_SOLVER_STEP_MAXITER = 15
     NL_SOLVER_STEP_ARMIJO    = 1.0e-4
     
     # output
     OUTPUT_VTK=False
     # memory check
-    MEMCHECK=True
+    MEMCHECK=False
+    REUSESOLVER=True
     #======================================
     # Setup VariableViscosityStokesProblem
     #======================================
@@ -112,7 +114,9 @@ def main():
                                         args.discretisation, # finite elems spaces
                                         k, # order of discretisation
                                         quaddegree=deg, #quadrature degree
-                                        quaddivdegree=divdegree) # qaudrature divdeg                      
+                                        quaddivdegree=divdegree, 
+                                        memcheck=MEMCHECK,
+                                        reusesolver=REUSESOLVER) # qaudrature divdeg 
     if quad:
         ## land_quad: 0.25, 3
         ## land_quad_finer: 0.25, 8
@@ -133,6 +137,7 @@ def main():
         dx_lower  = Measure("dx", domain=mesh, subdomain_id=sdl[2])
         dx = Measure("dx", domain=mesh, subdomain_id="everywhere")
     
+        dx        = dx(degree=deg)
         dx_upper  = dx_upper(degree=deg)
         dx_middle = dx_middle(degree=deg)
         dx_lower  = dx_lower(degree=deg)
@@ -313,11 +318,11 @@ def main():
                                    visc_lower, dx_lower, visc_middle, dx_middle)
     
     vvstokessolver = VariableViscosityStokesSolver(vvstokesprob, 
-                                                   "almg", 
+                                                   args.solver_type, 
                                                    args.case,
-                                                   1000,
+                                                   args.gamma,
                                                    args.asmbackend)
-    for i in range(2):
+    for i in range(1):
         vvstokesprob.set_linearvariationalproblem(a, l, sol, bcs)
         vvstokessolver.set_linearvariationalsolver()
         vvstokessolver.set_transfers()
@@ -329,6 +334,8 @@ def main():
             summary.print_(sum)
     
     vvstokessolver.destroy()
+    #del vvstokessolver ##TODO: not sure if it's useful
+    gc.collect()
     
     ## uncomment to compare solutions between augmented/unaugmented sys
     #solve(a==l, sol, bcs)
@@ -377,10 +384,23 @@ def main():
     if args.linearization == 'stressvel':
         # TODO: use Slate
         Md = assemble(Abstract.WeakForm_Phi.mass(Vd), mat_type='baij')
+
+    # setup nonlinear solver
+    if REUSESOLVER:
+        vvstokesprob.set_bcsfun(bcstep_fun)
+        bcs_step = vvstokesprob.get_bcs(mesh)
+        vvstokesprob.set_linearvariationalproblem(hess, grad, step, bcs_step)
+        vvstokessolver = VariableViscosityStokesSolver(vvstokesprob, 
+                                                       args.solver_type, 
+                                                       args.case,
+                                                       args.gamma,
+                                                       args.asmbackend)
+        vvstokessolver.set_linearvariationalsolver()
+        vvstokessolver.set_transfers()
     
     if MONITOR_NL_ITER:
         PETSc.Sys.Print('{0:<3} "{1:>6}"{2:^20}{3:^14}{4:^15}{5:^10}'.format(
-              "Itn", vvstokessolver.solver_type, "Energy", "||g||_l2", 
+              "Itn", args.solver_type, "Energy", "||g||_l2", 
                "(grad,step)", "step len"))
     
     for itn in range(NL_SOLVER_MAXITER+1):
@@ -419,17 +439,23 @@ def main():
         # assemble linearized system
         # TODO: is it possible to reuse the vvstokessolver? 
         Abstract.Vector.setZero(step)
-        vvstokesprob.set_bcsfun(bcstep_fun)
-        bcs_step = vvstokesprob.get_bcs(mesh)
-        vvstokesprob.set_linearvariationalproblem(hess, grad, step, bcs_step)
-        vvstokessolver = VariableViscosityStokesSolver(vvstokesprob, 
-                                                       args.solver_type, 
-                                                       args.case,
-                                                       args.gamma,
-                                                       args.asmbackend)
-        vvstokessolver.set_linearvariationalsolver()
-        vvstokessolver.set_transfers()
-        vvstokessolver.solve()
+        if REUSESOLVER:
+            vvstokessolver.set_BTWB_dicts()
+            vvstokessolver.solve()
+            if vvstokessolver.vtransfer:
+                vvstokessolver.vtransfer.bcs.clear()
+        else:
+            vvstokesprob.set_bcsfun(bcstep_fun)
+            bcs_step = vvstokesprob.get_bcs(mesh)
+            vvstokesprob.set_linearvariationalproblem(hess, grad, step, bcs_step)
+            vvstokessolver = VariableViscosityStokesSolver(vvstokesprob, 
+                                                           args.solver_type, 
+                                                           args.case,
+                                                           args.gamma,
+                                                           args.asmbackend)
+            vvstokessolver.set_linearvariationalsolver()
+            vvstokessolver.set_transfers()
+            vvstokessolver.solve()
         
         if MEMCHECK:
             PETSc.Sys.Print("[Mem] After nonlinear itn %d:" % itn)
@@ -440,6 +466,8 @@ def main():
         lin_it=vvstokessolver.get_iterationnum()
         lin_it_total += lin_it
         vvstokessolver.destroy()
+        #del vvstokessolver
+        gc.collect()
         
         ## uncomment to compare solutions between augmented/unaugmented sys
         #solve(hess == grad, step, bcs_step)
@@ -496,15 +524,16 @@ def main():
             sol.assign(sol_prev)
         Abstract.Vector.scale(step, -step_length)
     
-    PETSc.Sys.Print("%s: #iter %i, ||g|| reduction %3e, (grad,step) reduction %3e, #total linear iter %i." % \
-        (
-            args.linearization,
-            itn,
-            g_norm/g_norm_init,
-            np.abs(angle_grad_step/angle_grad_step_init),
-            lin_it_total
+    if NL_SOLVER_MAXITER > 0:
+        PETSc.Sys.Print("%s: #iter %i, ||g|| reduction %3e, (grad,step) reduction %3e, #total linear iter %i." % \
+            (
+                args.linearization,
+                itn,
+                g_norm/g_norm_init,
+                np.abs(angle_grad_step/angle_grad_step_init),
+                lin_it_total
+            )
         )
-    )
     if MEMCHECK:
         PETSc.Sys.Print("[Mem] Finished point:")
         allObjects=muppy.get_objects()

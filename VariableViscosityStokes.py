@@ -18,6 +18,7 @@ import star
 
 import numpy as np
 from pympler import asizeof
+from memory_profiler import profile
 
 class VariableViscosityStokesProblem():
     def create_basemesh(self,basemeshtype,Nx=-1, Ny=-1, Nz=-1, 
@@ -165,11 +166,11 @@ class VariableViscosityStokesProblem():
         if info:
             Z = V*Q
             size = Z.mesh().mpi_comm().size
-            PETSc.Sys.Print("dim(Z) = %i (%i per core) " \
+            PETSc.Sys.Print("[info] dim(Z) = %i (%i per core) " \
                                              % ( Z.dim(), Z.dim()/size))
-            PETSc.Sys.Print("dim(V) = %i (%i per core) " \
+            PETSc.Sys.Print("[info] dim(V) = %i (%i per core) " \
                                              % ( V.dim(), V.dim()/size))
-            PETSc.Sys.Print("dim(Q) = %i (%i per core) " \
+            PETSc.Sys.Print("[info] dim(Q) = %i (%i per core) " \
                                              % ( Q.dim(), Q.dim()/size))
             from sparsity import cache_sparsity
             cache_sparsity(Z, V, Q)
@@ -325,6 +326,8 @@ class VariableViscosityStokesProblem():
                                                                         % case)
         return W
 
+    fp=open('get_B_mat.log','w+')
+    @profile(stream=fp)
     def get_B_mat(self, mesh):
         divdegree = self.quaddivdeg
         V, Q = self.get_functionspace(mesh)
@@ -346,7 +349,7 @@ class VariableViscosityStokesProblem():
         
 
     def __init__(self, dim, quad, discretisation, discdegree, quaddegree=20,
-                 quaddivdegree=None):
+                 quaddivdegree=None, memcheck=False, reusesolver=False):
         self.dim=dim
         self.discretisation=discretisation
         self.k=discdegree
@@ -362,10 +365,15 @@ class VariableViscosityStokesProblem():
         self.mh = None
         self.mesh = None
         self.lvproblem = None
+        self.memcheck = memcheck
+        self.reusesolver = reusesolver
 
 class VariableViscosityStokesSolver():
     def set_precondviscosity(self, mufunlist): 
         self.precond_mulist = mufunlist
+
+    fp=open('set_BTWB_dicts.log','w+')
+    @profile(stream=fp)
     def set_BTWB_dicts(self):
         if self.BBCTWB_dict is not None:
             self.BBCTWB_dict.clear() # These are of type PETSc.Mat
@@ -382,53 +390,55 @@ class VariableViscosityStokesSolver():
         for level in range(self.problem.nref+1):
             levelmesh = mh[level]
             Wlevel = self.problem.get_W_mat(levelmesh,case,w,level=level)
-            PETSc.Sys.Print("[Mem] Size of W matrix on level %d:" % level)
-            PETSc.Sys.Print("[Mem]    ", asizeof.asized(Wlevel, detail=1).format())
-            PETSc.Sys.Print("[Mem]    info: global memory ", Wlevel.getInfo(2)['memory'])
-            PETSc.Sys.Print("[Mem]    info: global nz allocated ", Wlevel.getInfo(2)['nz_allocated'])
             BBClevel = self.problem.get_B_mat(levelmesh)
-            PETSc.Sys.Print("[Mem] Size of B matrix on level %d:" % level)
-            PETSc.Sys.Print("[Mem]    ", asizeof.asized(BBClevel, detail=1).format())
-            PETSc.Sys.Print("[Mem]    info: global memory ", BBClevel.getInfo(2)['memory'])
-            PETSc.Sys.Print("[Mem]    info: global nz allocated ", BBClevel.getInfo(2)['nz_allocated'])
+            if self.problem.memcheck:
+                PETSc.Sys.Print("[Mem] Size of W matrix on level %d:" % level)
+                PETSc.Sys.Print("[Mem]    info: global memory ", Wlevel.getInfo(3)['memory'])
+                PETSc.Sys.Print("[Mem]    info: global nz allocated ", Wlevel.getInfo(3)['nz_allocated'])
+                PETSc.Sys.Print("[Mem] Size of B matrix on level %d:" % level)
+                PETSc.Sys.Print("[Mem]    info: global memory ", BBClevel.getInfo(3)['memory'])
+                PETSc.Sys.Print("[Mem]    info: global nz allocated ", BBClevel.getInfo(3)['nz_allocated'])
             Wlevel *= gamma
-            if level in BBCTW_dict:
-                BBCTWlevel = BBClevel.transposeMatMult(Wlevel, 
-                                                  result=BBCTW_dict[level])
+            
+            if level == self.problem.nref:
+                if level in BBCTW_dict:
+                    BBCTWlevel = BBClevel.transposeMatMult(Wlevel, 
+                                                      result=BBCTW_dict[level])
+                else:
+                    BBCTWlevel = BBClevel.transposeMatMult(Wlevel)
+                    BBCTW_dict[level] = BBCTWlevel
+                    if self.problem.memcheck:
+                        PETSc.Sys.Print("[Mem] Size of BBCTW matrix on level %d:" % level)
+                        PETSc.Sys.Print("[Mem]    info: global memory ",BBCTW_dict[level].getInfo(3)['memory'])
+                        PETSc.Sys.Print("[Mem]    info: global nz allocated ",BBCTW_dict[level].getInfo(3)['nz_allocated'])
+
+            if level in BBCTWB_dict:
+                BBCTWBlevel = Wlevel.PtAP(BBClevel, result=BBCTWB_dict[level])
+                if self.problem.memcheck:
+                    PETSc.Sys.Print("[Mem] Size of BBCTWB matrix on level %d:" % level)
+                    PETSc.Sys.Print("[Mem]    info: global memory ", BBCTWBlevel.getInfo(3)['memory'])
+                    PETSc.Sys.Print("[Mem]    info: global nz allocated ", BBCTWBlevel.getInfo(3)['nz_allocated'])
             else:
-                BBCTWlevel = BBClevel.transposeMatMult(Wlevel)
-                BBCTW_dict[level] = BBCTWlevel
-                PETSc.Sys.Print("[Mem] Size of BBCTW matrix on level %d:" % level)
-                PETSc.Sys.Print("[Mem]    ", asizeof.asized(BBCTW_dict[level], detail=1).format())
-                PETSc.Sys.Print("[Mem]    info: global memory ",BBCTW_dict[level].getInfo(2)['memory'])
-                PETSc.Sys.Print("[Mem]    info: global nz allocated ",BBCTW_dict[level].getInfo(2)['nz_allocated'])
+                BBCTWB_dict[level] = Wlevel.PtAP(BBClevel)
+                if self.problem.memcheck:
+                    PETSc.Sys.Print("[Mem] Size of BBCTWB matrix on level %d:" % level)
+                    PETSc.Sys.Print("[Mem]    info: global memory ",BBCTWB_dict[level].getInfo(3)['memory'])
+                    PETSc.Sys.Print("[Mem]    info: global nz allocated ",BBCTWB_dict[level].getInfo(3)['nz_allocated'])
             #if level in BBCTWB_dict:
             #    BBCTWBlevel = BBCTWlevel.matMult(BBClevel, 
             #                                     result=BBCTWB_dict[level])
             #else:
             #    BBCTWBlevel = BBCTWlevel.matMult(BBClevel)
             #    BBCTWB_dict[level] = BBCTWBlevel
-            if level in BBCTWB_dict:
-                BBCTWBlevel = Wlevel.PtAP(BBClevel, result=BBCTWB_dict[level])
-                PETSc.Sys.Print("[Mem] Size of BBCTWB matrix on level %d:" % level)
-                PETSc.Sys.Print("[Mem]    ", asizeof.asized(BBCTWBlevel, detail=1).format())
-                PETSc.Sys.Print("[Mem]    info: global memory ", BBCTWBlevel.getInfo(2)['memory'])
-                PETSc.Sys.Print("[Mem]    info: global nz allocated ", BBCTWBlevel.getInfo(2)['nz_allocated'])
-            else:
-                BBCTWB_dict[level] = Wlevel.PtAP(BBClevel)
-                PETSc.Sys.Print("[Mem] Size of BBCTWB matrix on level %d:" % level)
-                PETSc.Sys.Print("[Mem]    ", asizeof.asized(BBCTWB_dict[level], detail=1).format())
-                PETSc.Sys.Print("[Mem]    info: global memory ",BBCTWB_dict[level].getInfo(2)['memory'])
-                PETSc.Sys.Print("[Mem]    info: global nz allocated ",BBCTWB_dict[level].getInfo(2)['nz_allocated'])
+
+            # After finish setting the dictionary, destroy matrix B, W
+            BBClevel.destroy()
+            Wlevel.destroy()
 
         self.BBCTWB_dict = BBCTWB_dict
         self.BBCTW_dict = BBCTW_dict 
-        PETSc.Sys.Print("[Mem] Size of BBCTWB dict:")
-        PETSc.Sys.Print("[Mem]    ", asizeof.asized(self.BBCTWB_dict, detail=1).format())
-        PETSc.Sys.Print("[Mem] Size of BBCTW dict:")
-        PETSc.Sys.Print("[Mem]    ", asizeof.asized(self.BBCTW_dict, detail=1).format())
         PETSc.Sys.Print("[Info] Computed BTWB products")
-        
+ 
     def set_transfers(self, transfers=None):
         if transfers is None and self.solver_type == "almg"\
                              and self.problem.discretisation == "cg":
@@ -439,6 +449,7 @@ class VariableViscosityStokesSolver():
             gamma = self.gamma
             asmbackend = self.asmbackend
             def BTWBcb(level):
+                PETSc.Sys.Print("[debug] Iside BTWBcb for transfer: ", self.BBCTWB_dict[level])
                 return self.BBCTWB_dict[level]
             def Acb(level):
                 ctx = lvsolver._ctx
@@ -593,7 +604,7 @@ class VariableViscosityStokesSolver():
                 "mat_type": "nest",
                 "ksp_type": "fgmres",
                 "ksp_gmres_restart": 300,
-                "ksp_rtol": 1.0e-6,
+                "ksp_rtol": 1.0e-3,
                 "ksp_atol": 1.0e-10,
                 "ksp_max_it": 300,
                 #"ksp_view": None,
@@ -672,6 +683,7 @@ class VariableViscosityStokesSolver():
         def aug_topleftblock(X, J, ctx):
             mh, level = get_level(ctx._x.ufl_domain())
             BTWBlevel = self.BBCTWB_dict[level]
+            PETSc.Sys.Print("[debug] BTWBlevel: ", BTWBlevel) # for testing reuse solver
             if level == nref:
                 Jsub = J.getNestSubMatrix(0, 0)
                 rmap, cmap = Jsub.getLGMap()
@@ -742,19 +754,29 @@ class VariableViscosityStokesSolver():
             self.set_BTWB_dicts()
         self.set_parameters()
 
+    fp=open("destroy.log",'w+')
+    @profile(stream=fp)
     def destroy(self):
         import gc
-        PETSc.Sys.Print("Calling manual destroys")
-        self.lvsolver._ctx._pjac.petscmat.destroy()
-        self.lvsolver._ctx._jac.petscmat.destroy()
-        self.lvsolver.snes.destroy()
-        tm = self.vtransfer
-        if tm is not None:
-            for k in tm.tensors.keys():
-                A, _, BTWB = tm.tensors[k]
-                A.petscmat.destroy()
-                BTWB.destroy()
-            for k in tm.solver.keys():
-                tm.solver[k].ksp.destroy()
-        PETSc.Sys.Print("Done with manual destroys")
+        PETSc.Sys.Print("[info] Calling manual destroys")
+        if not self.problem.reusesolver:
+            self.lvsolver.snes.destroy()
+            PETSc.Sys.Print(self.lvsolver._ctx._pjac.petscmat)
+            PETSc.Sys.Print(self.lvsolver._ctx._jac.petscmat)
+            self.lvsolver._ctx._pjac.petscmat.destroy()
+            self.lvsolver._ctx._jac.petscmat.destroy()
+
+            tm = self.vtransfer
+            if tm is not None:
+                for k in tm.tensors.keys():
+                    A, _, BTWB = tm.tensors[k]
+                    A.petscmat.destroy()
+                    BTWB.destroy()
+                for k in tm.solver.keys():
+                    tm.solver[k].ksp.destroy()
+        self.BBCTW_dict[self.problem.nref].destroy()
+        for level in range(self.problem.nref+1):
+            self.BBCTWB_dict[level].destroy()
+
+        PETSc.Sys.Print("[info] Done with manual destroys")
         gc.collect()
