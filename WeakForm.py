@@ -15,7 +15,7 @@ import sys
 
 import Abstract.WeakForm_Phi
 
-PHICASE = 'Ideal'
+PHICASE = 'Comp'
 #=======================================
 # Basic Weak Forms
 #=======================================
