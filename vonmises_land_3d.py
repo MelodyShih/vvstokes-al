@@ -377,7 +377,8 @@ def main():
     # assemble mass matrices
     if args.linearization == 'stressvel':
         # TODO: use Slate
-        Md = assemble(Abstract.WeakForm_Phi.mass(Vd), mat_type='baij')
+        #Md = assemble(Abstract.WeakForm_Phi.mass(Vd), mat_type='baij')
+        Mdinv = assemble(Tensor(Abstract.WeakForm_Phi.mass(Vd)).inv).petscmat
 
     # setup nonlinear solver
     if REUSESOLVER:
@@ -426,9 +427,12 @@ def main():
                 # project S to unit sphere
                 Sprojweak = WeakForm.hessian_dualUpdate_boundMaxMagnitude(S, Vd, 1.0)
                 b = assemble(Sprojweak)
-                solve(Md, S_proj.vector(), b, 
-                      solver_parameters={"ksp_monitor_true_residual": None, 
-                                         "ksp_type": "preonly", "pc_type":"lu"})
+                with assemble(Sprojweak).dat.vec_ro as v:
+                    with S_proj.dat.vec as sproj:
+                        Mdinv.mult(v, sproj)
+                #solve(Md, S_proj.vector(), b, 
+                #      solver_parameters={"ksp_monitor_true_residual": None, 
+                #                         "ksp_type": "preonly", "pc_type":"lu"})
     
         # assemble linearized system
         # TODO: is it possible to reuse the vvstokessolver? 
@@ -478,12 +482,14 @@ def main():
     
         # solve dual variable step
         if args.linearization == 'stressvel':
-            Abstract.Vector.scale(step, -1.0)
             b = assemble(dualStep)
-            solve(Md, S_step.vector(), b, solver_parameters={"ksp_monitor_true_residual": None, 
-                                                             "ksp_type": "fgmres",
-                                                             "pc_type": "jacobi", 
-                                                             "ksp_error_if_not_converged": 1})
+            with assemble(dualStep).dat.vec_ro as v:
+                with S_step.dat.vec as sstep:
+                    Mdinv.mult(v, sstep)
+            #solve(Md, S_step.vector(), b, solver_parameters={"ksp_monitor_true_residual": None, 
+            #                                                 "ksp_type": "fgmres",
+            #                                                 "pc_type": "jacobi", 
+            #                                                 "ksp_error_if_not_converged": 1})
             Abstract.Vector.scale(step, -1.0)
     
         # compute the norm of the gradient
