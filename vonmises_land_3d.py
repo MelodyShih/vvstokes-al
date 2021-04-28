@@ -482,6 +482,7 @@ def main():
     
         # solve dual variable step
         if args.linearization == 'stressvel':
+            Abstract.Vector.scale(step, -1.0)
             b = assemble(dualStep)
             with assemble(dualStep).dat.vec_ro as v:
                 with S_step.dat.vec as sstep:
