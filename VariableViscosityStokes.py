@@ -312,22 +312,22 @@ class VariableViscosityStokesProblem():
         p = TrialFunction(Q)
         q = TestFunction(Q)
         if case == 4:
-            W = assemble(Tensor(inner(p,q)*dx).inv, mat_type='aij').petscmat
+            W = assemble(Tensor(inner(p,q)*dx(degree=deg)).inv, mat_type='aij').petscmat
         elif case == 5:
             mu = self.mufun(mesh, level)
             W = assemble(Tensor(1.0/mu*inner(p,q)*dx(degree=deg)).inv,\
                                         mat_type='aij').petscmat
         elif case == 6:
             mu = self.mufun(mesh)
-            W = w*assemble(Tensor(1.0/mu*inner(p,q)*dx).inv).petscmat +\
-                (1-w)*assemble(Tensor(inner(p,q)*dx).inv).petscmat
+            W = w*assemble(Tensor(1.0/mu*inner(p,q)*dx(degree=deg)).inv).petscmat +\
+                (1-w)*assemble(Tensor(inner(p,q)*dx(degree=deg)).inv).petscmat
         else:
             raise ValueError("Augmented Jacobian (case %d) not implemented yet"\
                                                                         % case)
         return W
 
-    fp=open('get_B_mat.log','w+')
-    @profile(stream=fp)
+    #fp=open('get_B_mat.log','w+')
+    #@profile(stream=fp)
     def get_B_mat(self, mesh):
         divdegree = self.quaddivdeg
         V, Q = self.get_functionspace(mesh)
@@ -372,8 +372,8 @@ class VariableViscosityStokesSolver():
     def set_precondviscosity(self, mufunlist): 
         self.precond_mulist = mufunlist
 
-    fp=open('set_BTWB_dicts.log','w+')
-    @profile(stream=fp)
+    #fp=open('set_BTWB_dicts.log','w+')
+    #@profile(stream=fp)
     def set_BTWB_dicts(self):
         if self.BBCTWB_dict is not None:
             self.BBCTWB_dict.clear() # These are of type PETSc.Mat
@@ -604,7 +604,7 @@ class VariableViscosityStokesSolver():
                 "mat_type": "nest",
                 "ksp_type": "fgmres",
                 "ksp_gmres_restart": 300,
-                "ksp_rtol": 1.0e-3,
+                "ksp_rtol": 1.0e-6,
                 "ksp_atol": 1.0e-10,
                 "ksp_max_it": 300,
                 #"ksp_view": None,
@@ -700,6 +700,7 @@ class VariableViscosityStokesSolver():
             Fvel = F.getSubVector(vel_is)
             Fpre = F.getSubVector(pre_is)
             BTW  = self.BBCTW_dict[nref]
+            PETSc.Sys.Print("[debug] BTW: ", BTW) # for testing reuse solver
             Fvel += BTW*Fpre
             F.restoreSubVector(vel_is, Fvel)
             F.restoreSubVector(pre_is, Fpre)
@@ -754,8 +755,8 @@ class VariableViscosityStokesSolver():
             self.set_BTWB_dicts()
         self.set_parameters()
 
-    fp=open("destroy.log",'w+')
-    @profile(stream=fp)
+    #fp=open("destroy.log",'w+')
+    #@profile(stream=fp)
     def destroy(self):
         import gc
         PETSc.Sys.Print("[info] Calling manual destroys")
