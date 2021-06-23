@@ -49,7 +49,7 @@ def main():
     parser.add_argument("--gamma", type=float, default=1e4)
     parser.add_argument("--itref", type=int, default=0)
     parser.add_argument("--case", type=int, default=3)
-    parser.add_argument("--rate", type=int, default=2)
+    parser.add_argument("--rate", type=int, default=1)
     parser.add_argument("--discretisation", type=str, default="hdiv")
     parser.add_argument("--quad", dest="quad", default=False, action="store_true")
     parser.add_argument("--quad-deg", type=int, dest="quad_deg", default=10)
