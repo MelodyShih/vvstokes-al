@@ -47,7 +47,7 @@ parser.add_argument("--itref", type=int, default=0)
 parser.add_argument("--w", type=float, default=0.0)
 parser.add_argument("--discretisation", type=str, default="hdiv")
 parser.add_argument("--dim", type=int, default=2)
-parser.add_argument("--quad-deg", type=int, dest="quad_deg", default=20)
+parser.add_argument("--quad-deg", type=int, dest="quad_deg", default=10)
 parser.add_argument("--rebalance", dest="rebalance", default=False, action="store_true")
 parser.add_argument("--asmbackend", type=str, choices=['tinyasm', 'petscasm'], 
                                                              default="tinyasm")
@@ -112,7 +112,8 @@ vvstokesprob = VariableViscosityStokesProblem(dim, # dimension of the problem
                                     args.discretisation, # finite elems spaces
                                     k, # order of discretisation
                                     quaddegree=deg, #quadrature degree
-                                    quaddivdegree=divdegree) # qaudrature divdeg                      
+                                    quaddivdegree=divdegree,
+                                    memcheck=True) # qaudrature divdeg                      
 # set basemesh, mesh hierarchy  
 basemesh = vvstokesprob.create_basemesh("rectangle", N, N, N, 4, 4, 4)
 PETSc.Sys.Print("basemesh contains %d cells" % basemesh.num_cells())
@@ -185,6 +186,8 @@ vvstokessolver.set_nsp()
 vvstokessolver.set_linearvariationalsolver()
 if args.solver_type == "almg":
     vvstokessolver.set_transfers()
+else:
+    vvstokessolver.set_transfers(standard=True)
 
 #======================================
 # Solve the multisinker problem
@@ -200,4 +203,5 @@ for i in range(args.itref+1):
     vvstokessolver.solve()
     performance_info(COMM_WORLD, vvstokessolver)
 
+Citations.print_at_exit()
 #File("u.pvd").write(z.split()[0])

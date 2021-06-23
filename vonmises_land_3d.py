@@ -49,12 +49,18 @@ def main():
     parser.add_argument("--gamma", type=float, default=1e4)
     parser.add_argument("--itref", type=int, default=0)
     parser.add_argument("--case", type=int, default=3)
+    parser.add_argument("--rate", type=int, default=2)
     parser.add_argument("--discretisation", type=str, default="hdiv")
     parser.add_argument("--quad", dest="quad", default=False, action="store_true")
-    parser.add_argument("--quad-deg", type=int, dest="quad_deg", default=20)
+    parser.add_argument("--quad-deg", type=int, dest="quad_deg", default=10)
     parser.add_argument("--rebalance", dest="rebalance", default=False, action="store_true")
     parser.add_argument("--asmbackend", type=str, choices=['tinyasm', 'petscasm'], 
                                                                  default="tinyasm")
+    parser.add_argument("--output", dest="output", default=False, action="store_true")
+    parser.add_argument("--large", dest="large", default=False, action="store_true")
+    parser.add_argument("--outputcheck", dest="outputcheck", default=False, action="store_true")
+    parser.add_argument("--u0", type=float, default=1)
+    parser.add_argument("--maxiter", type=int, default=100)
     args, _ = parser.parse_known_args()
     
     
@@ -65,6 +71,8 @@ def main():
     deg = args.quad_deg
     divdegree = args.quad_deg
     quad = args.quad
+    rate = args.rate
+    u0 = args.u0
     rebalance = args.rebalance
     
     #firedrake.disable_performance_optimisations()
@@ -88,21 +96,25 @@ def main():
     REF_STRESS_RATE = 2.0*REF_STRAIN_RATE*REF_VISCOSITY
     
     VISC_UPPER_SCALED   = 1.e24/REF_VISCOSITY
-    VISC_MIDDLE_SCALED  = 1.e21/REF_VISCOSITY
+    VISC_MIDDLE_SCALED  = 1.e20/REF_VISCOSITY
     VISC_LOWER_SCALED   = 1.e17/REF_VISCOSITY
-    BOUNDARY_INFLOW_VELOCITY = 1.0
+    BOUNDARY_INFLOW_VELOCITY = u0
     
     # nolinear solver parameters
     MONITOR_NL_ITER=True
     MONITOR_NL_STEPSEARCH=False
     NL_SOLVER_GRAD_RTOL = 1e-8
     NL_SOLVER_GRAD_STEP_RTOL = 1e-8
-    NL_SOLVER_MAXITER = 100
+    if args.large:
+        NL_SOLVER_MAXITER = 0
+    else:
+        NL_SOLVER_MAXITER = args.maxiter
     NL_SOLVER_STEP_MAXITER = 15
     NL_SOLVER_STEP_ARMIJO    = 1.0e-4
     
     # output
-    OUTPUT_VTK=True
+    OUTPUT_VTK=args.output
+    OUTPUT_CHECK=args.outputcheck
     # memory check
     MEMCHECK=False
     REUSESOLVER=False
@@ -117,15 +129,25 @@ def main():
                                         quaddivdegree=divdegree, 
                                         memcheck=MEMCHECK,
                                         reusesolver=REUSESOLVER) # qaudrature divdeg 
+    distp = {"partition": True, 
+             "overlap_type": (DistributedMeshOverlapType.VERTEX, 1)}
     if quad:
         ## land_quad: 0.25, 3
         ## land_quad_finer: 0.25, 8
         ## land_quad_finer_finer: 0.25, 14
         #basemesh = Mesh('mesh/land.msh')
-        basemesh = Mesh('mesh/land_quad.msh')
+        if args.large:
+            basemesh = Mesh('mesh/land_quad.msh', distribution_parameters=distp)
+            vvstokesprob.Lz = 0.25
+            vvstokesprob.Nz = 4 #3  #8 (finer)
+        else:
+            basemesh = Mesh('mesh/land_quad.msh', distribution_parameters=distp)
+            vvstokesprob.Lz = 0.25
+            vvstokesprob.Nz = 3 #3  #8 (finer)
+        PETSc.Sys.Print("Lz = %f", vvstokesprob.Lz)
+        PETSc.Sys.Print("U0 = %f", BOUNDARY_INFLOW_VELOCITY)
+        #basemesh = Mesh('mesh/land_quad_3000.msh')
         #basemesh = Mesh('mesh/land_finer.msh')
-        vvstokesprob.Lz = 0.25
-        vvstokesprob.Nz = 3 #3  #8 (finer)
         vvstokesprob.set_meshhierarchy(basemesh, nref, rebal=rebalance)
         sdl = [2, 3, 1, 6, 4, 5] #dx_upper, dx_middle, dx_lower
                                  #face_y=0, face_x=0, face_x=4
@@ -180,8 +202,8 @@ def main():
         VQ = V*Q
     
         x = SpatialCoordinate(mesh)
-        vel_inflow_left  = ( (x[2]+1)*BOUNDARY_INFLOW_VELOCITY, 0.0, 0.0)
-        vel_inflow_right = (-(x[2]+1)*BOUNDARY_INFLOW_VELOCITY, 0.0, 0.0)
+        vel_inflow_left  = ( (rate*x[2]+1)*BOUNDARY_INFLOW_VELOCITY, 0.0, 0.0)
+        vel_inflow_right = (-(rate*x[2]+1)*BOUNDARY_INFLOW_VELOCITY, 0.0, 0.0)
     
         # construct boundary conditions
         if quad:
@@ -304,33 +326,56 @@ def main():
     # Effective viscosity field from linearization of the newton systems
     uII = WeakForm.strainrateII(sol_u)
     ## Ideal
-    mu = Constant(VISC_REG) + Min(visc_upper,0.5*yield_strength/uII)
+    #mu = Constant(VISC_REG) + Min(visc_upper,0.5*yield_strength/uII)
     ## Composite
-    #mu = visc_upper*yield_strength/(2*uII*visc_upper + yield_strength) 
+    mu = visc_upper*yield_strength/(2*uII*visc_upper + yield_strength) 
     
     #======================================
     # Solve the nonlinear problem
     #======================================
     # initialize solution
     #TODO add stablization term for hdiv discretisation
-    #PETSc.Log.begin()
+    #if args.checkpoint and args.linearization == "stressvel":
+    #    chk = DumbCheckpoint("dump.h5", mode=FILE_READ)
+    #    # Use a.name() to look up value
+    #    chk.load(sol)
+    #    chk.load(S)
+    #else:
     (a,l) = WeakForm.linear_stokes(rhs, VQ, visc_upper, dx, dx_upper,
                                    visc_lower, dx_lower, visc_middle, dx_middle)
-    
-    for i in range(2):
-        vvstokessolver = VariableViscosityStokesSolver(vvstokesprob, 
-                                                   args.solver_type, 
-                                                   args.case,
-                                                   args.gamma,
-                                                   args.asmbackend)
-        vvstokesprob.set_linearvariationalproblem(a, l, sol, bcs)
-        vvstokessolver.set_linearvariationalsolver()
-        vvstokessolver.set_transfers()
-        vvstokessolver.solve()
-        vvstokessolver.destroy()
-        del vvstokessolver ##TODO: not sure if it's useful
-        gc.collect()
-    
+    if args.large:
+        for i in range(1):
+            vvstokessolver = VariableViscosityStokesSolver(vvstokesprob, 
+                                                       args.solver_type, 
+                                                       args.case,
+                                                       10,
+                                                       args.asmbackend)
+            params = vvstokessolver.get_parameters()
+            params["ksp_rtol"]=1e-8
+            vvstokesprob.set_linearvariationalproblem(a, l, sol, bcs)
+            vvstokessolver.set_linearvariationalsolver()
+            #vvstokessolver.set_transfers(transfers=None, standard=True)
+            vvstokessolver.set_transfers(transfers=None)
+            vvstokessolver.solve()
+            vvstokessolver.destroy()
+            del vvstokessolver ##TODO: not sure if it's useful
+            gc.collect()
+    else:
+        for i in range(2):
+            vvstokessolver = VariableViscosityStokesSolver(vvstokesprob, 
+                                                       args.solver_type, 
+                                                       args.case,
+                                                       args.gamma,
+                                                       args.asmbackend)
+            params = vvstokessolver.get_parameters()
+            params["ksp_rtol"]=1e-4
+            vvstokesprob.set_linearvariationalproblem(a, l, sol, bcs)
+            vvstokessolver.set_linearvariationalsolver()
+            #vvstokessolver.set_transfers(transfers=None, standard=True)
+            vvstokessolver.set_transfers(transfers=None)
+            vvstokessolver.solve()
+            vvstokessolver.destroy()
+
     ## uncomment to compare solutions between augmented/unaugmented sys
     #solve(a==l, sol, bcs)
     #PETSc.Sys.Print("absolute diff in vel:",\
@@ -362,6 +407,8 @@ def main():
         #mu = Constant(VISC_REG) + Min(visc_upper, 0.5*yield_strength/uII)
         return mu
     vvstokesprob.set_viscosity(visc_fun_nonlinear) #used for W
+    vvstokesprob.set_bcsfun(bcstep_fun)
+    vvstokesprob.reset_BBC_dict()
     
     # initialize gradient
     g = assemble(grad, bcs=bcstep_fun(mesh))
@@ -378,6 +425,7 @@ def main():
     if args.linearization == 'stressvel':
         # TODO: use Slate
         #Md = assemble(Abstract.WeakForm_Phi.mass(Vd), mat_type='baij')
+        PETSc.Sys.Print(Vd.dim())
         Mdinv = assemble(Tensor(Abstract.WeakForm_Phi.mass(Vd)).inv).petscmat
 
     # setup nonlinear solver
@@ -436,14 +484,18 @@ def main():
     
         # assemble linearized system
         # TODO: is it possible to reuse the vvstokessolver? 
+        PETSc.Log.begin()
+        stagetest = PETSc.Log.Stage("Nonlinear solve")
+        stagetest.push()
         Abstract.Vector.setZero(step)
         if REUSESOLVER:
             vvstokessolver.set_BTWB_dicts()
             vvstokessolver.solve()
             if vvstokessolver.vtransfer:
                 vvstokessolver.vtransfer.bcs.clear()
+            lin_it=vvstokessolver.get_iterationnum()
+            vvstokessolver.destroy()
         else:
-            vvstokesprob.set_bcsfun(bcstep_fun)
             bcs_step = vvstokesprob.get_bcs(mesh)
             vvstokesprob.set_linearvariationalproblem(hess, grad, step, bcs_step)
             vvstokessolver = VariableViscosityStokesSolver(vvstokesprob, 
@@ -454,17 +506,20 @@ def main():
             vvstokessolver.set_linearvariationalsolver()
             vvstokessolver.set_transfers()
             vvstokessolver.solve()
+            stagetest.pop()
+            if args.large:
+                PETSc.Log.view()
+            lin_it=vvstokessolver.get_iterationnum()
+            vvstokessolver.destroy()
+            del vvstokessolver
         
-        if MEMCHECK:
-            PETSc.Sys.Print("[Mem] After nonlinear itn %d:" % itn)
-            allObjects=muppy.get_objects()
-            sum = summary.summarize(allObjects)
-            summary.print_(sum)
+        #if MEMCHECK:
+        #    PETSc.Sys.Print("[Mem] After nonlinear itn %d:" % itn)
+        #    allObjects=muppy.get_objects()
+        #    sum = summary.summarize(allObjects)
+        #    summary.print_(sum)
     
-        lin_it=vvstokessolver.get_iterationnum()
         lin_it_total += lin_it
-        vvstokessolver.destroy()
-        del vvstokessolver
         gc.collect()
         
         ## uncomment to compare solutions between augmented/unaugmented sys
@@ -483,7 +538,7 @@ def main():
         # solve dual variable step
         if args.linearization == 'stressvel':
             Abstract.Vector.scale(step, -1.0)
-            b = assemble(dualStep)
+            #b = assemble(dualStep)
             with assemble(dualStep).dat.vec_ro as v:
                 with S_step.dat.vec as sstep:
                     Mdinv.mult(v, sstep)
@@ -524,6 +579,22 @@ def main():
         if not step_success:
             sol.assign(sol_prev)
         Abstract.Vector.scale(step, -step_length)
+        
+        # output vtk file for strain rate 
+        if OUTPUT_CHECK:
+            # set the 2nd invariant of the strain rate
+            strainrateII = WeakForm.strainrateII(sol_u)
+            visceff = WeakForm.visceff(sol_u, visc_upper, VISC_REG,
+                                       yield_strength)
+
+            Vd1 = FunctionSpace(mesh, "DQ", k)
+            edotp   = Function(Vd1)
+            edotp_t = TestFunction(Vd1)
+            solve((inner(edotp_t, (edotp - visceff))*dx_upper+ \
+                   inner(edotp_t, (edotp - visc_lower))*dx_lower+ \
+                   inner(edotp_t, (edotp - visc_middle))*dx_middle) == 0.0, edotp)
+            File("/scratch1/04841/tg841407/stokes_2021-05-06/vtk/land3d_visceff_DGk_"+str(itn)+".pvd",project_output=True).write(edotp)
+        
     
     if NL_SOLVER_MAXITER > 0:
         PETSc.Sys.Print("%s: #iter %i, ||g|| reduction %3e, (grad,step) reduction %3e, #total linear iter %i." % \
@@ -535,11 +606,11 @@ def main():
                 lin_it_total
             )
         )
-    if MEMCHECK:
-        PETSc.Sys.Print("[Mem] Finished point:")
-        allObjects=muppy.get_objects()
-        sum = summary.summarize(allObjects)
-        summary.print_(sum)
+    #if MEMCHECK:
+    #    PETSc.Sys.Print("[Mem] Finished point:")
+    #    allObjects=muppy.get_objects()
+    #    sum = summary.summarize(allObjects)
+    #    summary.print_(sum)
     
     #======================================
     # Output
@@ -552,23 +623,30 @@ def main():
     
     # output vtk file for strain rate 
     if OUTPUT_VTK:
-        Vd1 = FunctionSpace(mesh, "DG", 0)
+        Vde = FiniteElement("DQ", mesh.ufl_cell(), k, variant="equispaced")
+        Vd1 = FunctionSpace(mesh, Vde)
+        #Vd1 = FunctionSpace(mesh, "DQ", k, variant="equispaced")
         edotp   = Function(Vd1)
-        edotp_t = TestFunction(Vd1)
-        solve(inner(edotp_t, (edotp - strainrateII))*dx == 0.0, edotp)
+        #edotp_t = TestFunction(Vd1)
+        #solve(inner(edotp_t, (edotp - strainrateII))*dx == 0.0, edotp)
+        edotp.interpolate(strainrateII)
         Abstract.Vector.scale(edotp, REF_STRAIN_RATE)
-        File("/scratch1/04841/tg841407/stokes_2021-04-28/vtk/land3d_large_strainrateII.pvd").write(edotp)
+        File("/scratch1/04841/tg841407/stokes_2021-06-03/vtk/land3d_DGk_strainrateII_"+str(nref)+".pvd").write(edotp)
     
-        Vd1 = FunctionSpace(mesh, "DG", 0)
+        #Vd1 = FunctionSpace(mesh, "DQ", k, variant="equispaced")
         edotp   = Function(Vd1)
-        edotp_t = TestFunction(Vd1)
-        solve((inner(edotp_t, (edotp - visceff))*dx_upper+ \
-               inner(edotp_t, (edotp - visc_lower))*dx_lower+ \
-               inner(edotp_t, (edotp - visc_middle))*dx_middle) == 0.0, edotp)
-        File("/scratch1/04841/tg841407/stokes_2021-04-28/vtk/land3d_large_visceff.pvd").write(edotp)
+        #edotp_t = TestFunction(Vd1)
+        edotp.interpolate(visceff,     subset=mesh.cell_subset(sdl[0]))
+        #edotp.dat.data[edotp.dat.data<0.5] =0.5
+        edotp.interpolate(visc_middle, subset=mesh.cell_subset(sdl[1]))
+        edotp.interpolate(visc_lower,  subset=mesh.cell_subset(sdl[2]))
+        #solve((inner(edotp_t, (edotp - visceff))*dx_upper+ \
+        #       inner(edotp_t, (edotp - visc_lower))*dx_lower+ \
+        #       inner(edotp_t, (edotp - visc_middle))*dx_middle) == 0.0, edotp)
+        File("/scratch1/04841/tg841407/stokes_2021-06-03/vtk/land3d_visceff_DGk_"+str(rate)+".pvd").write(edotp)
     
-        File("/scratch1/04841/tg841407/stokes_2021-04-28/vtk/land3d_large_solution_u.pvd").write(sol_u)
-        File("/scratch1/04841/tg841407/stokes_2021-04-28/vtk/land3d_large_solution_p.pvd").write(sol_p)
+        File("/scratch1/04841/tg841407/stokes_2021-06-03/vtk/land3d_solution_u_"+str(nref)+".pvd",project_output=True).write(sol_u)
+        File("/scratch1/04841/tg841407/stokes_2021-06-03/vtk/land3d_solution_p_"+str(nref)+".pvd",project_output=True).write(sol_p)
 
 if __name__ == '__main__':
     main()
