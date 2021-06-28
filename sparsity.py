@@ -8,7 +8,7 @@ from firedrake.mg.utils import get_level
 # This should only take like half a second, but due to a bug in
 # PyOP2/petsc/mpi/..., this suddenly takes ~half a minute once more than 10
 # nodes or so are used.
-def cache_sparsity(ZZ, VV, QQ):
+def cache_sparsity(ZZ, VV, QQ, WW=None):
     level = get_level(ZZ.ufl_domain())[1]
     for i in range(level+1):
         def build_sparsity(V0, V1, nest=None, block_sparse=None):
@@ -20,7 +20,9 @@ def cache_sparsity(ZZ, VV, QQ):
         build_sparsity(ZZ, ZZ, nest=True, block_sparse=True)
         build_sparsity(QQ, QQ, nest=False, block_sparse=False)
         build_sparsity(VV, VV, nest=False, block_sparse=False)
-        VV = coarsen(VV, coarsen)
         ZZ = coarsen(ZZ, coarsen)
+        VV = coarsen(VV, coarsen)
         QQ = coarsen(QQ, coarsen)
-
+        if WW is not None:
+            build_sparsity(WW, WW, nest=False, block_sparse=False)
+            WW = coarsen(WW, coarsen)

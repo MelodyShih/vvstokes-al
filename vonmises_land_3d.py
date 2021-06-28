@@ -190,7 +190,7 @@ def main():
     VQ = V*Q
     
     from sparsity import cache_sparsity
-    cache_sparsity(VQ, V, Q)
+    cache_sparsity(VQ, V, Q, Vd)
     
     
     # set functions for boundary conditions
