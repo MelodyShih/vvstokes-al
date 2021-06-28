@@ -24,5 +24,7 @@ def cache_sparsity(ZZ, VV, QQ, WW=None):
         VV = coarsen(VV, coarsen)
         QQ = coarsen(QQ, coarsen)
         if WW is not None:
+            WWc = coarsen(WW, coarsen)
+            inject(Function(WW), Function(WWc))
+            WWc = WW
             build_sparsity(WW, WW, nest=False, block_sparse=False)
-            WW = coarsen(WW, coarsen)
