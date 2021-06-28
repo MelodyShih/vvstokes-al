@@ -88,7 +88,11 @@ class VariableViscosityStokesProblem():
                 dm.setLabelValue("prolongation", p, i+2)
 
         if dim == 3 and self.quad:
-                basemh = MeshHierarchy(basemesh, nref, callbacks=(before,after))
+                PETSc.Sys.Print("before basemh")
+                basemh = MeshHierarchy(basemesh, nref, callbacks=(before,after), 
+                                       distribution_parameters=distp)
+                PETSc.Sys.Print("after basemh")
+                basemh[-1].topology_dm.view()
                 mh = ExtrudedMeshHierarchy(basemh, height=self.Lz, 
                                            base_layer=self.Nz)
         else:
@@ -146,8 +150,9 @@ class VariableViscosityStokesProblem():
                     Q = FunctionSpace(mesh, "DPC", k-1)
                     #Q = FunctionSpace(mesh, "DQ", k-2)
 
-                    Vd_e = TensorElement('DQ', mesh.ufl_cell(), k-1)
+                    Vd_e = TensorElement('DQ', mesh.ufl_cell(), k)
                     Vd = FunctionSpace(mesh, Vd_e)
+                    PETSc.Sys.Print(Vd.dim())
                 else:
                     Pk = FiniteElement("Lagrange", mesh.ufl_cell(), k)
                     if k < 3:
@@ -249,12 +254,14 @@ class VariableViscosityStokesProblem():
             for bc in bcs:
                 if "DG" in str(bc._function_space):
                     continue
+                if "DQ" in str(bc._function_space):
+                    continue
                 g = bc.function_arg
                 bid = bc.sub_domain
                 F += nitsche(u, v, mu, bid, g)
         else:
             raise ValueError("unknown discretisation %s" %self.discretisation)
-        F += -p*div(v)*dx(degree=divdegree)-div(u)*q*dx(degree=divdegree)
+        F += -p*div(v)*dx(degree=divdegree)-div(u)*q*dx(degree=None)
         return F
 
     def get_weakform_A(self, mesh, bcs=None):
@@ -329,24 +336,35 @@ class VariableViscosityStokesProblem():
     #fp=open('get_B_mat.log','w+')
     #@profile(stream=fp)
     def get_B_mat(self, mesh):
-        divdegree = self.quaddivdeg
-        V, Q = self.get_functionspace(mesh)
-        Z = V*Q
-        u, p = TrialFunctions(Z)
-        v, q = TestFunctions(Z)
-        bcs = self.get_bcs(mesh)
+        _, level = get_level(mesh)
+        if level in self.BBC_dict:
+            return self.BBC_dict[level]
+        else:
+            divdegree = self.quaddivdeg
+            V, Q = self.get_functionspace(mesh)
+            Z = V*Q
+            u, p = TrialFunctions(Z)
+            v, q = TestFunctions(Z)
+            bcs = self.get_bcs(mesh)
 
-        M = assemble(-q * div(u) * dx(degree=divdegree),\
-                   bcs=bcs,mat_type='nest').petscmat
-        M.getNestSubMatrix(0, 0).destroy()
-        M.getNestSubMatrix(0, 1).destroy()
-        M.getNestSubMatrix(1, 1).destroy()
-        BBC = M.getNestSubMatrix(1, 0)
-        return BBC
+            M = assemble(-q * div(u) * dx(degree=divdegree),\
+                       bcs=bcs,mat_type='nest').petscmat
+            M.getNestSubMatrix(0, 0).destroy()
+            M.getNestSubMatrix(0, 1).destroy()
+            M.getNestSubMatrix(1, 1).destroy()
+            BBC = M.getNestSubMatrix(1, 0)
+            self.BBC_dict[level] = M.getNestSubMatrix(1, 0) 
+            return BBC
 
     def set_linearvariationalproblem(self, a, l, z, bcs):
         self.lvproblem = LinearVariationalProblem(a, l, z, bcs=bcs)
-        
+
+    def reset_BBC_dict(self):
+        # destroy petsc mats first
+        if self.BBC_dict is not None:
+            for level in range(self.nref+1):
+                self.BBC_dict[level].destroy()
+            self.BBC_dict.clear()
 
     def __init__(self, dim, quad, discretisation, discdegree, quaddegree=20,
                  quaddivdegree=None, memcheck=False, reusesolver=False):
@@ -367,6 +385,7 @@ class VariableViscosityStokesProblem():
         self.lvproblem = None
         self.memcheck = memcheck
         self.reusesolver = reusesolver
+        self.BBC_dict = {}
 
 class VariableViscosityStokesSolver():
     def set_precondviscosity(self, mufunlist): 
@@ -432,15 +451,15 @@ class VariableViscosityStokesSolver():
             #    BBCTWB_dict[level] = BBCTWBlevel
 
             # After finish setting the dictionary, destroy matrix B, W
-            BBClevel.destroy()
             Wlevel.destroy()
 
         self.BBCTWB_dict = BBCTWB_dict
         self.BBCTW_dict = BBCTW_dict 
         PETSc.Sys.Print("[Info] Computed BTWB products")
  
-    def set_transfers(self, transfers=None):
-        if transfers is None and self.solver_type == "almg"\
+    def set_transfers(self, transfers=None, standard=False):
+        if transfers is None and standard is False \
+                             and self.solver_type == "almg"\
                              and self.problem.discretisation == "cg":
             lvsolver = self.lvsolver
             dim  = self.problem.dim
@@ -532,6 +551,8 @@ class VariableViscosityStokesSolver():
                 "ksp_max_it": 1,
                 "pc_type": "lu",
                 "pc_factor_mat_solver_type": "mumps",
+                "pc_factor_mat_mumps_icntl_24": 1,
+                "pc_factor_mat_mumps_icntl_7": 3,
             }
 
             fieldsplit_0_hypre = {
@@ -595,6 +616,10 @@ class VariableViscosityStokesSolver():
                 "mg_coarse_pc_python_type": "firedrake.AssembledPC",
                 "mg_coarse_assembled_pc_type": "lu",
                 "mg_coarse_assembled_pc_factor_mat_solver_type": "mumps",
+                #"mg_coarse_assembled_pc_factor_mat_solver_type": "superlu_dist",
+                "mg_coarse_assembled_mat_mumps_icntl_24": 1,
+                "mg_coarse_assembled_mat_mumps_icntl_7": 3,
+                "mg_coarse_assembled_mat_mumps_icntl_14": 300,
                 #"mg_coarse_ksp_monitor_true_residual": None,
             }
 
@@ -607,6 +632,7 @@ class VariableViscosityStokesSolver():
                 "ksp_rtol": 1.0e-6,
                 "ksp_atol": 1.0e-10,
                 "ksp_max_it": 300,
+                #"ksp_convergence_test": "skip",
                 #"ksp_view": None,
                 "ksp_monitor_true_residual": None,
                 "ksp_converged_reason": None,
@@ -683,7 +709,7 @@ class VariableViscosityStokesSolver():
         def aug_topleftblock(X, J, ctx):
             mh, level = get_level(ctx._x.ufl_domain())
             BTWBlevel = self.BBCTWB_dict[level]
-            PETSc.Sys.Print("[debug] BTWBlevel: ", BTWBlevel) # for testing reuse solver
+            PETSc.Sys.Print("[debug] Level", level, ", BTWBlevel: ", BTWBlevel) # for testing reuse solver
             if level == nref:
                 Jsub = J.getNestSubMatrix(0, 0)
                 rmap, cmap = Jsub.getLGMap()
@@ -695,15 +721,17 @@ class VariableViscosityStokesSolver():
                 J.setLGMap(rmap, cmap)
 
         def modify_residual(X, F):
+            PETSc.Sys.Print("[debug] Before:", F.norm()) # for testing reuse solver
             vel_is = Z._ises[0]
             pre_is = Z._ises[1]
             Fvel = F.getSubVector(vel_is)
             Fpre = F.getSubVector(pre_is)
             BTW  = self.BBCTW_dict[nref]
-            PETSc.Sys.Print("[debug] BTW: ", BTW) # for testing reuse solver
+            PETSc.Sys.Print("[debug] Modify residual. BTW: ", BTW) # for testing reuse solver
             Fvel += BTW*Fpre
             F.restoreSubVector(vel_is, Fvel)
             F.restoreSubVector(pre_is, Fpre)
+            PETSc.Sys.Print("[debug] After:", F.norm()) # for testing reuse solver
 
         if augtopleftblock:
             post_jcb = augtopleftblock_cb if augtopleftblock_cb is not None \
