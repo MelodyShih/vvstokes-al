@@ -17,8 +17,6 @@ from balance import load_balance, rebalance
 import star
 
 import numpy as np
-from pympler import asizeof
-from memory_profiler import profile
 
 class VariableViscosityStokesProblem():
     def create_basemesh(self,basemeshtype,Nx=-1, Ny=-1, Nz=-1, 
@@ -152,7 +150,7 @@ class VariableViscosityStokesProblem():
 
                     Vd_e = TensorElement('DQ', mesh.ufl_cell(), k)
                     Vd = FunctionSpace(mesh, Vd_e)
-                    PETSc.Sys.Print(Vd.dim())
+                    PETSc.Sys.Print('Vd.dim() = %i' % Vd.dim())
                 else:
                     Pk = FiniteElement("Lagrange", mesh.ufl_cell(), k)
                     if k < 3:
@@ -407,6 +405,7 @@ class VariableViscosityStokesSolver():
         w = self.w
         gamma = self.gamma
         for level in range(self.problem.nref+1):
+            PETSc.Sys.Print("[Info] Start BTWB on level %i" % level)
             levelmesh = mh[level]
             Wlevel = self.problem.get_W_mat(levelmesh,case,w,level=level)
             BBClevel = self.problem.get_B_mat(levelmesh)
@@ -596,6 +595,34 @@ class VariableViscosityStokesSolver():
                 # "pc_hexstar_sub_sub_pc_factor_mat_solver_type": "umfpack",
             }
 
+            size = self.problem.mesh.mpi_comm().size
+            if size > 192:
+                telescope_factor = round(size/24.0)
+                coarse_solver = {
+                    "pc_type": "python",
+                    "pc_python_type": "firedrake.AssembledPC",
+                    "assembled": {
+                        "mat_type": "aij",
+                        "pc_type": "telescope",
+                        "pc_telescope_reduction_factor": telescope_factor,
+                        "pc_telescope_subcomm_type": "contiguous",
+                        "telescope_pc_type": "lu",
+                        "telescope_pc_factor_mat_solver_type": "mumps",
+                    }
+                }
+            else:
+                coarse_solver = {
+                    "pc_type": "python",
+                    "pc_python_type": "firedrake.AssembledPC",
+                    "assembled_pc_type": "lu",
+                    "assembled_pc_factor_mat_solver_type": "mumps",
+                    #"assembled_pc_factor_mat_solver_type": "superlu_dist",
+                    "assembled_mat_mumps_icntl_24": 1,
+                    "assembled_mat_mumps_icntl_7": 3,
+                    "assembled_mat_mumps_icntl_14": 300,
+                    #"ksp_monitor_true_residual": None,
+                }
+
             fieldsplit_0_mg = {
                 "ksp_type": "preonly",
                 "ksp_norm_type": "unpreconditioned",
@@ -612,15 +639,7 @@ class VariableViscosityStokesSolver():
                 #"mg_levels": mg_levels_solver,
                 #"mg_coarse_ksp_type": "richardson",
                 #"mg_coarse_ksp_max_it": 1,
-                "mg_coarse_pc_type": "python",
-                "mg_coarse_pc_python_type": "firedrake.AssembledPC",
-                "mg_coarse_assembled_pc_type": "lu",
-                "mg_coarse_assembled_pc_factor_mat_solver_type": "mumps",
-                #"mg_coarse_assembled_pc_factor_mat_solver_type": "superlu_dist",
-                "mg_coarse_assembled_mat_mumps_icntl_24": 1,
-                "mg_coarse_assembled_mat_mumps_icntl_7": 3,
-                "mg_coarse_assembled_mat_mumps_icntl_14": 300,
-                #"mg_coarse_ksp_monitor_true_residual": None,
+                "mg_coarse" : coarse_solver
             }
 
             params = {

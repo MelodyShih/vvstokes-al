@@ -22,10 +22,7 @@ import copy
 import argparse
 import numpy as np
 import gc
-from pympler import summary
-from pympler import muppy
 
-from memory_profiler import profile
 
 
 
@@ -137,7 +134,14 @@ def main():
         ## land_quad_finer_finer: 0.25, 14
         #basemesh = Mesh('mesh/land.msh')
         if args.large:
-            basemesh = Mesh('mesh/land_quad.msh', distribution_parameters=distp)
+            #meshfile = 'mesh/land_quad_4813.msh'
+            #meshfile = 'mesh/land_quad_3561.msh'
+            meshfile = 'mesh/land_quad_2988.msh'
+            #meshfile = 'mesh/land_quad_2650.msh'
+            #meshfile = 'mesh/land_quad_2256.msh'
+            #meshfile = 'mesh/land_quad.msh'
+            PETSc.Sys.Print("Reading", meshfile)
+            basemesh = Mesh(meshfile, distribution_parameters=distp)
             vvstokesprob.Lz = 0.25
             vvstokesprob.Nz = 4 #3  #8 (finer)
         else:
@@ -343,6 +347,8 @@ def main():
     #else:
     (a,l) = WeakForm.linear_stokes(rhs, VQ, visc_upper, dx, dx_upper,
                                    visc_lower, dx_lower, visc_middle, dx_middle)
+    import time
+    t1  = time.time()
     if args.large:
         for i in range(1):
             vvstokessolver = VariableViscosityStokesSolver(vvstokesprob, 
@@ -376,6 +382,8 @@ def main():
             vvstokessolver.solve()
             vvstokessolver.destroy()
 
+    t2 = time.time()
+    PETSc.Sys.Print("Time for linear solver = %.3f" % (t2-t1))
     ## uncomment to compare solutions between augmented/unaugmented sys
     #solve(a==l, sol, bcs)
     #PETSc.Sys.Print("absolute diff in vel:",\
@@ -488,6 +496,8 @@ def main():
         stagetest = PETSc.Log.Stage("Nonlinear solve")
         stagetest.push()
         Abstract.Vector.setZero(step)
+        import time
+        t1 = time.time()
         if REUSESOLVER:
             vvstokessolver.set_BTWB_dicts()
             vvstokessolver.solve()
@@ -506,12 +516,14 @@ def main():
             vvstokessolver.set_linearvariationalsolver()
             vvstokessolver.set_transfers()
             vvstokessolver.solve()
-            stagetest.pop()
-            if args.large:
-                PETSc.Log.view()
             lin_it=vvstokessolver.get_iterationnum()
             vvstokessolver.destroy()
             del vvstokessolver
+        stagetest.pop()
+        if args.large:
+            PETSc.Log.view()
+        t2 = time.time()
+        PETSc.Sys.Print("Time for nonlinear solver %i = %.3f" % (itn, t2-t1))
         
         #if MEMCHECK:
         #    PETSc.Sys.Print("[Mem] After nonlinear itn %d:" % itn)

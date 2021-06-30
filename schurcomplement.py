@@ -1,5 +1,4 @@
 from firedrake import *
-from memory_profiler import profile
 
 class DGMassInv(PCBase):
 
