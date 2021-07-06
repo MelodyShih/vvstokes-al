@@ -188,14 +188,14 @@ solver_lu = {
 solver_hypre = {
     "pc_type": "hypre",
     "pc_hypre_type": "boomeramg",
-    #"pc_hypre_boomeramg_strong_threshold": 0.25,
+    #"pc_hypre_boomeramg_strong_threshold": 0.8,
     "pc_hypre_boomeramg_max_iter": 5,
     "pc_hypre_boomeramg_grid_sweeps_down": 5,
     "pc_hypre_boomeramg_grid_sweeps_up": 5,
     "pc_hypre_boomeramg_grid_sweeps_coarse": 1,
     "pc_hypre_boomeramg_cycle_type": "W",
-    "pc_hypre_boomeramg_max_levels": 5, 
-    "pc_hypre_boomeramg_max_coarse_size": 262929342,
+    "pc_hypre_boomeramg_max_levels": 15, 
+    #"pc_hypre_boomeramg_max_coarse_size": 1500,
     "pc_hypre_boomeramg_relax_type_coarse": "Gaussian-elimination",
     "pc_hypre_boomeramg_print_statistics": None,
     "ksp_view": None,
@@ -311,7 +311,6 @@ if vvstokessolver.solver_type == "almg" and vvstokesprob.discretisation == "cg":
 # Solve the multisinker problem
 #======================================
 for i in range(args.itref+1):
-    PETSc.Log.begin()
     vvstokessolver.solve()
     #solver.solve()
     performance_info(COMM_WORLD, vvstokessolver)

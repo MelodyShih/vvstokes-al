@@ -88,10 +88,8 @@ class VariableViscosityStokesProblem():
                 dm.setLabelValue("prolongation", p, i+2)
 
         if dim == 3 and self.quad:
-                PETSc.Sys.Print("before basemh")
                 basemh = MeshHierarchy(basemesh, nref, callbacks=(before,after), 
                                        distribution_parameters=distp)
-                PETSc.Sys.Print("after basemh")
                 basemh[-1].topology_dm.view()
                 mh = ExtrudedMeshHierarchy(basemh, height=self.Lz, 
                                            base_layer=self.Nz)
