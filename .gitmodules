@@ -1,0 +1,6 @@
+[submodule "matpatch"]
+	path = matpatch
+	url = git@github.com:florianwechsung/matpatch.git
+[submodule "alfi"]
+	path = alfi
+	url = https://github.com/florianwechsung/alfi.git
