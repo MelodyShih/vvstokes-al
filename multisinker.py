@@ -116,9 +116,7 @@ vvstokesprob = VariableViscosityStokesProblem(dim, # dimension of the problem
                                     memcheck=True) # qaudrature divdeg                      
 # set basemesh, mesh hierarchy  
 basemesh = vvstokesprob.create_basemesh("rectangle", N, N, N, 4, 4, 4)
-PETSc.Sys.Print("basemesh contains %d cells" % basemesh.num_cells())
 vvstokesprob.set_meshhierarchy(basemesh, nref, rebal)
-PETSc.Sys.Print("Finish mesh hierarchy")
 # set viscosity field
 vvstokesprob.set_viscosity(mu_expr)
 
@@ -131,7 +129,7 @@ V, Q = vvstokesprob.get_functionspace(mesh,info=True)
 Z = V*Q
 from sparsity import cache_sparsity
 cache_sparsity(Z, V, Q)
-PETSc.Sys.Print("Finished sparsity")
+
 v, q = TestFunctions(Z)
 rhsweak = -10 * (chi_n(mesh)-1)*v[1] * dx(degree=deg)
 if args.nonzero_rhs:
@@ -197,7 +195,6 @@ if args.nonzero_initial_guess:
     sol_z.split()[0].project(Constant((1., 1.)))
     sol_z.split()[1].interpolate(SpatialCoordinate(mesh)[1]-2)
 
-PETSc.Sys.Print("Start solves")
 for i in range(args.itref+1):
     PETSc.Log.begin()
     vvstokessolver.solve()

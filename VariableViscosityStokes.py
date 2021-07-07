@@ -90,7 +90,8 @@ class VariableViscosityStokesProblem():
         if dim == 3 and self.quad:
                 basemh = MeshHierarchy(basemesh, nref, callbacks=(before,after), 
                                        distribution_parameters=distp)
-                basemh[-1].topology_dm.view()
+                if self.debug:
+                    basemh[-1].topology_dm.view()
                 mh = ExtrudedMeshHierarchy(basemh, height=self.Lz, 
                                            base_layer=self.Nz)
         else:
@@ -364,13 +365,14 @@ class VariableViscosityStokesProblem():
             self.BBC_dict.clear()
 
     def __init__(self, dim, quad, discretisation, discdegree, quaddegree=20,
-                 quaddivdegree=None, memcheck=False, reusesolver=False):
+                 quaddivdegree=None, memcheck=False, reusesolver=False, debug=False):
         self.dim=dim
         self.discretisation=discretisation
         self.k=discdegree
         self.quad=quad
         self.quaddeg = quaddegree
         self.quaddivdeg = quaddivdegree
+        self.debug = debug
         self.mufun = None
         self.dxlist = [dx]
         self.mu_min = -1

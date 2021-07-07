@@ -150,7 +150,6 @@ hess = WeakForm.hessian_NewtonStandard(sol_u, sol_p, Z, visc, VISC_REG,
 # Solve the nonlinear problem
 #======================================
 # initialize solution
-#TODO add stablization term for hdiv discretisation
 (a,l) = WeakForm.linear_stokes(rhs, Z, visc)
 
 vvstokesprob.set_linearvariationalproblem(a, l, sol, bcs)
@@ -162,6 +161,9 @@ vvstokessolver = VariableViscosityStokesSolver(vvstokesprob,
 vvstokessolver.set_linearvariationalsolver()
 vvstokessolver.set_transfers()
 vvstokessolver.solve()
+vvstokessolver.destroy()
+del vvstokessolver
+gc.collect()
 
 # initialize gradient
 g = assemble(grad, bcs=bcstep_fun(mesh))
@@ -212,6 +214,9 @@ for itn in range(NL_SOLVER_MAXITER+1):
     vvstokessolver.set_linearvariationalsolver(augtopleftblock=True,
                                                modifyresidual=True)
     vvstokessolver.solve()
+    vvstokessolver.destroy()
+    del vvstokessolver
+    gc.collect()
     
     # compute the norm of the gradient
     g = assemble(grad, bcs=bcs_step)

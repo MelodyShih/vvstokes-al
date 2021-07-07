@@ -107,10 +107,10 @@ class DGMassInv(PCBase):
 
     def destroy(self, pc):
         if self.viscmassinv is not None:
-            PETSc.Sys.Print("[mem] local viscmassinv size",
-                              self.viscmassinv.getInfo(1)['memory'])
+            #PETSc.Sys.Print("[mem] local viscmassinv size",
+            #                  self.viscmassinv.getInfo(1)['memory'])
             self.viscmassinv.destroy()
         if self.massinv is not None:
-            PETSc.Sys.Print("[mem] local massinv size",
-                              self.massinv.getInfo(1)['memory'])
+            #PETSc.Sys.Print("[mem] local massinv size",
+            #                  self.massinv.getInfo(1)['memory'])
             self.massinv.destroy()

@@ -237,6 +237,9 @@ vvstokessolver.set_transfers()
 
 for i in range(args.itref+1):
     vvstokessolver.solve()
+vvstokessolver.destroy()
+del vvstokessolver
+gc.collect()
 
 ## uncomment to compare solutions between augmented/unaugmented sys
 #solve(a==l, sol2, bcs)
@@ -317,6 +320,10 @@ for itn in range(NL_SOLVER_MAXITER+1):
     vvstokessolver.solve()
     lin_it=vvstokessolver.get_iterationnum()
     lin_it_total += lin_it
+
+    vvstokessolver.destroy()
+    del vvstokessolver
+    gc.collect()
     
     ## uncomment to compare solutions between augmented/unaugmented sys
     #solve(hess == grad, step2, bcs_step)

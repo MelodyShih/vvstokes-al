@@ -368,7 +368,8 @@ for itn in range(NL_SOLVER_MAXITER+1):
 
     lin_it=vvstokessolver.get_iterationnum()
     lin_it_total += lin_it
-
+    
+    vvstokessolver.destroy()
     del vvstokessolver
     gc.collect()
     
