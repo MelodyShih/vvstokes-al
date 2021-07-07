@@ -150,7 +150,6 @@ class VariableViscosityStokesProblem():
 
                     Vd_e = TensorElement('DQ', mesh.ufl_cell(), k)
                     Vd = FunctionSpace(mesh, Vd_e)
-                    PETSc.Sys.Print(Vd.dim())
                 else:
                     Pk = FiniteElement("Lagrange", mesh.ufl_cell(), k)
                     if k < 3:
@@ -441,19 +440,14 @@ class VariableViscosityStokesSolver():
                     PETSc.Sys.Print("[Mem] Size of BBCTWB matrix on level %d:" % level)
                     PETSc.Sys.Print("[Mem]    info: global memory ",BBCTWB_dict[level].getInfo(3)['memory'])
                     PETSc.Sys.Print("[Mem]    info: global nz allocated ",BBCTWB_dict[level].getInfo(3)['nz_allocated'])
-            #if level in BBCTWB_dict:
-            #    BBCTWBlevel = BBCTWlevel.matMult(BBClevel, 
-            #                                     result=BBCTWB_dict[level])
-            #else:
-            #    BBCTWBlevel = BBCTWlevel.matMult(BBClevel)
-            #    BBCTWB_dict[level] = BBCTWBlevel
 
             # After finish setting the dictionary, destroy matrix B, W
             Wlevel.destroy()
 
         self.BBCTWB_dict = BBCTWB_dict
         self.BBCTW_dict = BBCTW_dict 
-        PETSc.Sys.Print("[Info] Computed BTWB products")
+        if self.debug:
+            PETSc.Sys.Print("[debug] Computed BTWB products")
  
     def set_transfers(self, transfers=None, standard=False):
         if transfers is None and standard is False \
@@ -466,7 +460,8 @@ class VariableViscosityStokesSolver():
             gamma = self.gamma
             asmbackend = self.asmbackend
             def BTWBcb(level):
-                PETSc.Sys.Print("[debug] Iside BTWBcb for transfer: ", self.BBCTWB_dict[level])
+                if self.debug:
+                    PETSc.Sys.Print("[debug] Inside BTWBcb for transfer: ", self.BBCTWB_dict[level])
                 return self.BBCTWB_dict[level]
             def Acb(level):
                 ctx = lvsolver._ctx
@@ -707,7 +702,8 @@ class VariableViscosityStokesSolver():
         def aug_topleftblock(X, J, ctx):
             mh, level = get_level(ctx._x.ufl_domain())
             BTWBlevel = self.BBCTWB_dict[level]
-            PETSc.Sys.Print("[debug] Level", level, ", BTWBlevel: ", BTWBlevel) # for testing reuse solver
+            if self.debug:
+                PETSc.Sys.Print("[debug] Level", level, ", BTWBlevel: ", BTWBlevel) # for testing reuse solver
             if level == nref:
                 Jsub = J.getNestSubMatrix(0, 0)
                 rmap, cmap = Jsub.getLGMap()
@@ -719,17 +715,20 @@ class VariableViscosityStokesSolver():
                 J.setLGMap(rmap, cmap)
 
         def modify_residual(X, F):
-            PETSc.Sys.Print("[debug] Before:", F.norm()) # for testing reuse solver
+            if self.debug:
+                PETSc.Sys.Print("[debug] Before:", F.norm()) # for testing reuse solver
             vel_is = Z._ises[0]
             pre_is = Z._ises[1]
             Fvel = F.getSubVector(vel_is)
             Fpre = F.getSubVector(pre_is)
             BTW  = self.BBCTW_dict[nref]
-            PETSc.Sys.Print("[debug] Modify residual. BTW: ", BTW) # for testing reuse solver
+            if self.debug:
+                PETSc.Sys.Print("[debug] Modify residual. BTW: ", BTW) # for testing reuse solver
             Fvel += BTW*Fpre
             F.restoreSubVector(vel_is, Fvel)
             F.restoreSubVector(pre_is, Fpre)
-            PETSc.Sys.Print("[debug] After:", F.norm()) # for testing reuse solver
+            if self.debug:
+                PETSc.Sys.Print("[debug] After:", F.norm()) # for testing reuse solver
 
         if augtopleftblock:
             post_jcb = augtopleftblock_cb if augtopleftblock_cb is not None \
@@ -760,13 +759,14 @@ class VariableViscosityStokesSolver():
         self.lvsolver.solve()
         
     def __init__(self, problem, solver_type, case, gamma, asmbackend=None, w=0,
-                 setBTWBdics=True):
+                 setBTWBdics=True, debug=False):
         self.case = case
         self.w = w
         self.problem = problem
         self.solver_type = solver_type
         self.asmbackend = asmbackend
         self.gamma = Constant(gamma)
+        self.debug = debug
         self.params = None
         self.nsp = None
         self.transfers = None
@@ -783,13 +783,15 @@ class VariableViscosityStokesSolver():
 
     #fp=open("destroy.log",'w+')
     #@profile(stream=fp)
-    def destroy(self):
+    def destroy(self, info=False):
         import gc
-        PETSc.Sys.Print("[info] Calling manual destroys")
+        if info:
+            PETSc.Sys.Print("[info] Calling manual destroys")
         if not self.problem.reusesolver:
             self.lvsolver.snes.destroy()
-            PETSc.Sys.Print(self.lvsolver._ctx._pjac.petscmat)
-            PETSc.Sys.Print(self.lvsolver._ctx._jac.petscmat)
+            if info:
+                PETSc.Sys.Print(self.lvsolver._ctx._pjac.petscmat)
+                PETSc.Sys.Print(self.lvsolver._ctx._jac.petscmat)
             self.lvsolver._ctx._pjac.petscmat.destroy()
             self.lvsolver._ctx._jac.petscmat.destroy()
 
@@ -805,5 +807,6 @@ class VariableViscosityStokesSolver():
         for level in range(self.problem.nref+1):
             self.BBCTWB_dict[level].destroy()
 
-        PETSc.Sys.Print("[info] Done with manual destroys")
+        if info:
+            PETSc.Sys.Print("[info] Done with manual destroys")
         gc.collect()

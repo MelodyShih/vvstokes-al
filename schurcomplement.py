@@ -4,7 +4,6 @@ from memory_profiler import profile
 class DGMassInv(PCBase):
 
     def initialize(self, pc):
-        PETSc.Sys.Print("Initialized DGMASSInv")
         _, P = pc.getOperators()
         appctx = self.get_appctx(pc)
         V = dmhooks.get_function_space(pc.getDM())
