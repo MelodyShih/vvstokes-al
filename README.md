@@ -1,29 +1,42 @@
-# Installation
+## Installation
 
-First install firedrake by following the instructions on [their website](https://firedrakeproject.org/download.html):
+* Get Firedrake with tinyasm: 
 
-    curl -O https://raw.githubusercontent.com/firedrakeproject/firedrake/master/scripts/firedrake-install
-    python3 firedrake-install
+Install firedrake with tinyasm (as backend for ASMPatchPC) by following the instructions on [their website](https://firedrakeproject.org/download.html):
+```
+curl -O https://raw.githubusercontent.com/firedrakeproject/firedrake/master/scripts/firedrake-install
+python3 firedrake-install --tinyasm
+```
 
-Now activate the firedrake venv
+* Get the changes of the firedrake codes that is required for the vvstokes-al codes. 
 
-    source /path/to/firedrake/bin/activate
+Go to the firdrake repo and checkout to the branch: https://github.com/MelodyShih/firedrake
+```
+cd /path/to/firedrake//src/firedrake
+git remote add test git@github.com:MelodyShih/firedrake.git
+git fetch test
+git checkout test/melody/vvstokes-al
+```
 
-Then clone this repository and all its submodules:
+* Clone this repository and all its submodules:
+```
+git clone --recursive git@github.com:MelodyShih/vvstokes-al.git
+cd vvstokes-al/
+```
 
-    git clone --recursive git@github.com:florianwechsung/vvstokes-hdiv.git
-    cd vvstokes-hdiv/
+* Activate the firedrake venv and install the alfi codes
+```
+source /path/to/firedrake/bin/activate
+pip3 install -e alfi/
+```
 
-Now install the Block Jacobi code
-
-    pip3 install -e matpatch/
-
-# Usage
+## Usage
 
 The firedrake venv needs to be activated:
-
-    source /path/to/firedrake/bin/activate
-
+```
+source /path/to/firedrake/bin/activate
+```
 Now you can run:
-
-    python3 stokes.py --solver-type almg --gamma 1e2 --nref 1 --dr 1e4 --k 2
+```
+python3 multisinker.py --solver-type almg --gamma 10 --nref 3 --dr 1e4 --k 3 --case 4 --N 16 --dim 2 --asmbackend tinyasm --nsinker 24 --quad
+```
