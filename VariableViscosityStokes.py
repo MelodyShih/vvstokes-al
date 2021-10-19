@@ -205,8 +205,10 @@ class VariableViscosityStokesProblem():
         divdegree = self.quaddivdeg
         discretisation = self.discretisation
         V,Q = self.get_functionspace(mesh)
-        u = TrialFunction(V)
-        v = TestFunction(V)
+        Z = V*Q
+        u,p = TrialFunctions(Z)
+        v,q = TestFunctions(Z)
+
         if discretisation == "hdiv":
             aug = Constant(gamma)*inner(div(u)-divrhs, div(v))*dx(degree=divdegree)
         elif discretisation == "cg":
@@ -222,6 +224,7 @@ class VariableViscosityStokesProblem():
         divdegree = None
         V, Q = self.get_functionspace(mesh)
         Z = V*Q
+
         u,p = TrialFunctions(Z)
         v,q = TestFunctions(Z)
         mu = self.mufun(mesh)

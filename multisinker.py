@@ -17,6 +17,7 @@ from firedrake.mg.utils import get_level
 from balance import load_balance, rebalance
 
 from VariableViscosityStokes import *
+from Abstract import Vector
 import copy 
 import argparse
 import numpy as np
@@ -51,6 +52,7 @@ parser.add_argument("--quad-deg", type=int, dest="quad_deg", default=10)
 parser.add_argument("--rebalance", dest="rebalance", default=False, action="store_true")
 parser.add_argument("--asmbackend", type=str, choices=['tinyasm', 'petscasm'], 
                                                              default="tinyasm")
+parser.add_argument("--perturbmesh", dest="perturbmesh", default=False, action="store_true")
 args, _ = parser.parse_known_args()
 
 
@@ -117,6 +119,27 @@ vvstokesprob = VariableViscosityStokesProblem(dim, # dimension of the problem
 # set basemesh, mesh hierarchy  
 basemesh = vvstokesprob.create_basemesh("rectangle", N, N, N, 4, 4, 4)
 vvstokesprob.set_meshhierarchy(basemesh, nref, rebal)
+
+# perturb mesh
+if args.perturbmesh:
+    mh = vvstokesprob.get_meshhierarchy()
+    Vc = VectorFunctionSpace(mh[0], "CG", 1)
+    defo = Function(Vc)
+    defodata = 2e-3 * np.random.standard_normal(size=mh[0].coordinates.dat.data[:, :].shape)
+    defodata[mh[0].coordinates.function_space().boundary_nodes("on_boundary"), :] = 0.
+    defo.dat.data[:] = defodata
+    
+    from firedrake.mg.utils import get_level
+    for mesh in mh:
+        _, level = get_level(mesh)
+        if level > 0:
+            Vf = VectorFunctionSpace(mesh, "CG", 1)
+            defof = Function(Vf)
+            firedrake.mg.interface.prolong(defo, defof)
+            mesh.coordinates.dat.data[:, :] += defof.dat.data[:]
+        else: 
+            mesh.coordinates.dat.data[:, :] += defo.dat.data[:]
+
 # set viscosity field
 vvstokesprob.set_viscosity(mu_expr)
 
@@ -182,6 +205,7 @@ params["ksp_converged_reason"]=None
 vvstokessolver.set_nsp()
 # set firedrake LinearVariationalSolver
 vvstokessolver.set_linearvariationalsolver()
+
 if args.solver_type == "almg":
     vvstokessolver.set_transfers()
 else:
@@ -200,5 +224,5 @@ for i in range(args.itref+1):
     vvstokessolver.solve()
     performance_info(COMM_WORLD, vvstokessolver)
 
-Citations.print_at_exit()
+#Citations.print_at_exit()
 #File("u.pvd").write(z.split()[0])
