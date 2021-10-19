@@ -153,7 +153,7 @@ assert k==2
 if dim == 2:
     if args.quad:
         V  = VectorFunctionSpace(mesh, "CG", k)
-        Q = FunctionSpace(mesh, "DQ", k-2)
+        Q = FunctionSpace(mesh, "CG", k-1)
     else:
         V  = VectorFunctionSpace(mesh, "CG", k)
         Q  = FunctionSpace(mesh, "DG", 0)
@@ -189,7 +189,7 @@ else:
 rhsweak += divrhs * q * dx(degree=divdegree)
 
 mh = vvstokesprob.get_meshhierarchy()
-Vc, Qc = vvstokesprob.get_functionspace(mh[0],info=True)
+Vc, Qc = vvstokesprob.get_functionspace(mh[-1],info=True)
 
 #--------------------------------------
 # Setup weak form of the variable viscosity Stokes eq
@@ -224,7 +224,7 @@ vvstokessolver = VariableViscosityStokesSolver(vvstokesprob,
                                       args.solver_type, 
                                       args.case,
                                       args.gamma,
-                                      args.asmbackend)
+                                      args.asmbackend, setBTWBdics=False)
 
 # monitor residual
 params = vvstokessolver.get_parameters()
@@ -259,4 +259,4 @@ for i in range(args.itref+1):
     performance_info(COMM_WORLD, vvstokessolver)
 
 #Citations.print_at_exit()
-#File("u.pvd").write(z.split()[0])
+File("u.pvd").write(sol_z.split()[0])
