@@ -685,11 +685,12 @@ class VariableViscosityStokesSolver():
                     "ksp_rtol": 1.0e-10,
                     "ksp_max_it": 200,
                     "pc_type": "mg",
-                    "pc_mg_cycle_type": "v",
-                    "pc_mg_type": "multiplicative",
+                    "pc_mg_type": "full",
+                    #"pc_mg_cycle_type": "v",
+                    #"pc_mg_type": "multiplicative",
                     "mg_levels_ksp_type": "gmres",
                     "mg_levels_ksp_convergence_test": "skip",
-                    "mg_levels_ksp_max_it": 2,
+                    "mg_levels_ksp_max_it": 5,
                     "mg_levels_pc_type": "python",
                     "mg_levels_pc_python_type": "firedrake.PatchPC",
                     "mg_levels_patch_pc_patch_save_operators": True,
@@ -784,10 +785,10 @@ class VariableViscosityStokesSolver():
 
         solver = LinearVariationalSolver(self.problem.lvproblem,
                                          solver_parameters=params,
-                                         # options_prefix="ns_",)
-                                         # post_jacobian_callback=post_jcb,
-                                         # post_function_callback=post_fcb,
-                                         # appctx=appctx,
+                                         options_prefix="ns_",
+                                         post_jacobian_callback=post_jcb,
+                                         post_function_callback=post_fcb,
+                                         appctx=appctx,
                                          nullspace=nsp)
         self.lvsolver = solver
         #self.set_transfers()

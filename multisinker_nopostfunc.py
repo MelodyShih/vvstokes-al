@@ -153,8 +153,9 @@ vvstokesprob.set_bcsfun(bc_fun)
 bcs = vvstokesprob.get_bcs(mesh)
 # Weak form of Stokes
 F = vvstokesprob.get_weakform_stokes(mesh,bcs)
-aug = vvstokesprob.get_weakform_augterm(mesh, args.gamma, 0.0)
-F += aug
+if args.solver_type != "vanka":
+    aug = vvstokesprob.get_weakform_augterm(mesh, args.gamma, 0.0)
+    F += aug
 F += rhsweak
 
 
