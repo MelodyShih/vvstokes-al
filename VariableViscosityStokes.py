@@ -125,6 +125,15 @@ class VariableViscosityStokesProblem():
                 Q  = FunctionSpace(mesh, "DG", k-1)
                 Vd_e = TensorElement('DG', mesh.ufl_cell(), k-1)
                 Vd = FunctionSpace(mesh, Vd_e)
+        elif discretisation == "cgcg":
+            assert k==2
+            if dim == 2 and quad:
+                V  = VectorFunctionSpace(mesh, "CG", k)
+                Vd_e = TensorElement('DQ', mesh.ufl_cell(), k-1)
+                Vd = FunctionSpace(mesh, Vd_e)
+                Q = FunctionSpace(mesh, "CG", k-1)
+            else:
+                raise NotImplementedError("cgcg: Only implemented for dim=2, quad mesh")
         elif discretisation == "cg":
             if dim == 2:
                 if quad:
@@ -133,7 +142,6 @@ class VariableViscosityStokesProblem():
                     Vd = FunctionSpace(mesh, Vd_e)
                     Q  = FunctionSpace(mesh, "DPC", k-1)
                     # Q = FunctionSpace(mesh, "DQ", k-2)
-                    Q = FunctionSpace(mesh, "CG", k-1)
                 else:
                     V  = VectorFunctionSpace(mesh, "CG", k)
                     Vd_e = TensorElement('DG', mesh.ufl_cell(), k-1)
@@ -164,7 +172,7 @@ class VariableViscosityStokesProblem():
             else:
                 raise NotImplementedError("Only implemented for dim=2,3")
         else:
-            raise ValueError("please specify hdiv or cg for --discretisation")
+            raise ValueError("please specify hdiv or cg or cgcg for --discretisation")
         if info:
             Z = V*Q
             size = Z.mesh().mpi_comm().size
@@ -229,7 +237,7 @@ class VariableViscosityStokesProblem():
         mu = self.mufun(mesh)
 
         #F = self.get_weakform_A(mesh, bcs)
-        if self.discretisation == "cg":
+        if self.discretisation == "cg" or self.discretisation == "cgcg":
             # (1,1) block
             F = (mu*inner(2*sym(grad(u)), grad(v)))*dx(degree=deg)
         elif self.discretisation == "hdiv":
@@ -260,7 +268,7 @@ class VariableViscosityStokesProblem():
                 bid = bc.sub_domain
                 F += nitsche(u, v, mu, bid, g)
         else:
-            raise ValueError("unknown discretisation %s" %self.discretisation)
+            raise ValueError("Only implement for discretisation cg or hdiv or cgcg; discretisation provided: %s" %self.discretisation)
         F += -p*div(v)*dx(degree=divdegree)-div(u)*q*dx(degree=None)
         return F
 

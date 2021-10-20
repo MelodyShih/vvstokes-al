@@ -128,32 +128,7 @@ vvstokesprob.set_viscosity(mu_expr)
 #--------------------------------------
 # rhs
 mesh = vvstokesprob.get_mesh()
-assert k==2
-if dim == 2:
-    if args.quad:
-        V  = VectorFunctionSpace(mesh, "CG", k)
-        Q = FunctionSpace(mesh, "CG", k-1)
-    else:
-        V  = VectorFunctionSpace(mesh, "CG", k)
-        Q  = FunctionSpace(mesh, "DG", 0)
-elif dim == 3:
-    if args.quad:
-        horiz_elt = FiniteElement("CG", quadrilateral, k)
-        vert_elt = FiniteElement("CG", interval, k)
-        elt = VectorElement(TensorProductElement(horiz_elt, vert_elt))
-        V = FunctionSpace(mesh, elt)
-        Q = FunctionSpace(mesh, "DQ", k-2)
-    else:
-        Pk = FiniteElement("Lagrange", mesh.ufl_cell(), k)
-        if k < 3:
-            FB = FiniteElement("FacetBubble", mesh.ufl_cell(), 3)
-            eleu = VectorElement(NodalEnrichedElement(Pk, FB))
-        else:
-            eleu = VectorElement(Pk)
-        V = FunctionSpace(mesh, eleu)
-        Q = FunctionSpace(mesh, "DG", 0)
-else:
-    raise NotImplementedError("Only implemented for dim=2,3")
+V, Q = vvstokesprob.get_functionspace(mesh,info=True)
 
 Z = V*Q
 from sparsity import cache_sparsity
