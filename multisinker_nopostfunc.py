@@ -120,27 +120,6 @@ vvstokesprob = VariableViscosityStokesProblem(dim, # dimension of the problem
 basemesh = vvstokesprob.create_basemesh("rectangle", N, N, N, 4, 4, 4)
 vvstokesprob.set_meshhierarchy(basemesh, nref, rebal)
 
-# perturb mesh
-if args.perturbmesh:
-    mh = vvstokesprob.get_meshhierarchy()
-    Vc = VectorFunctionSpace(mh[0], "CG", 1)
-    defo = Function(Vc)
-    defodata = 2e-3 * np.random.standard_normal(size=mh[0].coordinates.dat.data[:, :].shape)
-    defodata[mh[0].coordinates.function_space().boundary_nodes("on_boundary"), :] = 0.
-    defo.dat.data[:] = defodata
-    
-    from firedrake.mg.utils import get_level
-    for mesh in mh:
-        _, level = get_level(mesh)
-        PETSc.Sys.Print("level = %d\n" % level)
-        if level > 0:
-            Vf = VectorFunctionSpace(mesh, "CG", 1)
-            defof = Function(Vf)
-            firedrake.mg.interface.prolong(defo, defof)
-            mesh.coordinates.dat.data[:, :] += defof.dat.data[:]
-        else: 
-            mesh.coordinates.dat.data[:, :] += defo.dat.data[:]
-
 # set viscosity field
 vvstokesprob.set_viscosity(mu_expr)
 
@@ -189,7 +168,6 @@ else:
 rhsweak += divrhs * q * dx(degree=divdegree)
 
 mh = vvstokesprob.get_meshhierarchy()
-Vc, Qc = vvstokesprob.get_functionspace(mh[-1],info=True)
 
 #--------------------------------------
 # Setup weak form of the variable viscosity Stokes eq

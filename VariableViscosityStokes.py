@@ -17,8 +17,6 @@ from balance import load_balance, rebalance
 import star
 
 import numpy as np
-from pympler import asizeof
-from memory_profiler import profile
 
 class VariableViscosityStokesProblem():
     def create_basemesh(self,basemeshtype,Nx=-1, Ny=-1, Nz=-1, 
@@ -335,8 +333,6 @@ class VariableViscosityStokesProblem():
                                                                         % case)
         return W
 
-    #fp=open('get_B_mat.log','w+')
-    #@profile(stream=fp)
     def get_B_mat(self, mesh):
         _, level = get_level(mesh)
         if level in self.BBC_dict:
@@ -394,8 +390,6 @@ class VariableViscosityStokesSolver():
     def set_precondviscosity(self, mufunlist): 
         self.precond_mulist = mufunlist
 
-    #fp=open('set_BTWB_dicts.log','w+')
-    #@profile(stream=fp)
     def set_BTWB_dicts(self):
         if self.BBCTWB_dict is not None:
             self.BBCTWB_dict.clear() # These are of type PETSc.Mat
@@ -820,8 +814,6 @@ class VariableViscosityStokesSolver():
             self.set_BTWB_dicts()
         self.set_parameters()
 
-    #fp=open("destroy.log",'w+')
-    #@profile(stream=fp)
     def destroy(self, info=False):
         import gc
         if info:
