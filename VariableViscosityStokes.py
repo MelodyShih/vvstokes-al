@@ -19,6 +19,28 @@ import star
 import numpy as np
 
 class VariableViscosityStokesProblem():
+    def __init__(self, dim, quad, discretisation, discdegree, quaddegree=20,
+                 quaddivdegree=None, memcheck=False, reusesolver=False, debug=False):
+        self.dim=dim
+        self.discretisation=discretisation
+        self.k=discdegree
+        self.quad=quad
+        self.quaddeg = quaddegree
+        self.quaddivdeg = quaddivdegree
+        self.debug = debug
+        self.mufun = None
+        self.dxlist = [dx]
+        self.mu_min = -1
+        self.mu_max = -1
+        self.nref = -1
+        self.baseN = -1
+        self.mh = None
+        self.mesh = None
+        self.lvproblem = None
+        self.memcheck = memcheck
+        self.reusesolver = reusesolver
+        self.BBC_dict = {}
+
     def create_basemesh(self,basemeshtype,Nx=-1, Ny=-1, Nz=-1, 
                         Lx=-1, Ly=-1, Lz=-1, Cr=-1):
         distp = {"partition": True, 
@@ -372,29 +394,58 @@ class VariableViscosityStokesProblem():
                 self.BBC_dict[level].destroy()
             self.BBC_dict.clear()
 
-    def __init__(self, dim, quad, discretisation, discdegree, quaddegree=20,
-                 quaddivdegree=None, memcheck=False, reusesolver=False, debug=False):
-        self.dim=dim
-        self.discretisation=discretisation
-        self.k=discdegree
-        self.quad=quad
-        self.quaddeg = quaddegree
-        self.quaddivdeg = quaddivdegree
-        self.debug = debug
-        self.mufun = None
-        self.dxlist = [dx]
-        self.mu_min = -1
-        self.mu_max = -1
-        self.nref = -1
-        self.baseN = -1
-        self.mh = None
-        self.mesh = None
-        self.lvproblem = None
-        self.memcheck = memcheck
-        self.reusesolver = reusesolver
-        self.BBC_dict = {}
-
 class VariableViscosityStokesSolver():
+    def __init__(self, problem, solver_type, case, gamma, asmbackend=None, w=0,
+                 setBTWBdics=True, debug=False):
+        self.case = case
+        self.w = w
+        self.problem = problem
+        self.solver_type = solver_type
+        self.asmbackend = asmbackend
+        self.gamma = Constant(gamma)
+        self.debug = debug
+        self.params = None
+        self.nsp = None
+        self.transfers = None
+        self.BBCTWB_dict = None
+        self.BBCTW_dict = None
+        self.lvsolver = None
+        self.precond_mulist = None
+        self.vtransfer = None
+
+        ## default setup
+        if setBTWBdics is True:
+            self.set_BTWB_dicts()
+        self.set_parameters()
+
+    def destroy(self, info=False):
+        import gc
+        if info:
+            PETSc.Sys.Print("[info] Calling manual destroys")
+        if not self.problem.reusesolver:
+            self.lvsolver.snes.destroy()
+            if info:
+                PETSc.Sys.Print(self.lvsolver._ctx._pjac.petscmat)
+                PETSc.Sys.Print(self.lvsolver._ctx._jac.petscmat)
+            self.lvsolver._ctx._pjac.petscmat.destroy()
+            self.lvsolver._ctx._jac.petscmat.destroy()
+
+            tm = self.vtransfer
+            if tm is not None:
+                for k in tm.tensors.keys():
+                    A, _, BTWB = tm.tensors[k]
+                    A.petscmat.destroy()
+                    BTWB.destroy()
+                for k in tm.solver.keys():
+                    tm.solver[k].ksp.destroy()
+        self.BBCTW_dict[self.problem.nref].destroy()
+        for level in range(self.problem.nref+1):
+            self.BBCTWB_dict[level].destroy()
+
+        if info:
+            PETSc.Sys.Print("[info] Done with manual destroys")
+        gc.collect()
+
     def set_precondviscosity(self, mufunlist): 
         self.precond_mulist = mufunlist
 
@@ -799,54 +850,3 @@ class VariableViscosityStokesSolver():
 
     def solve(self):
         self.lvsolver.solve()
-        
-    def __init__(self, problem, solver_type, case, gamma, asmbackend=None, w=0,
-                 setBTWBdics=True, debug=False):
-        self.case = case
-        self.w = w
-        self.problem = problem
-        self.solver_type = solver_type
-        self.asmbackend = asmbackend
-        self.gamma = Constant(gamma)
-        self.debug = debug
-        self.params = None
-        self.nsp = None
-        self.transfers = None
-        self.BBCTWB_dict = None
-        self.BBCTW_dict = None
-        self.lvsolver = None
-        self.precond_mulist = None
-        self.vtransfer = None
-
-        ## default setup
-        if setBTWBdics is True:
-            self.set_BTWB_dicts()
-        self.set_parameters()
-
-    def destroy(self, info=False):
-        import gc
-        if info:
-            PETSc.Sys.Print("[info] Calling manual destroys")
-        if not self.problem.reusesolver:
-            self.lvsolver.snes.destroy()
-            if info:
-                PETSc.Sys.Print(self.lvsolver._ctx._pjac.petscmat)
-                PETSc.Sys.Print(self.lvsolver._ctx._jac.petscmat)
-            self.lvsolver._ctx._pjac.petscmat.destroy()
-            self.lvsolver._ctx._jac.petscmat.destroy()
-
-            tm = self.vtransfer
-            if tm is not None:
-                for k in tm.tensors.keys():
-                    A, _, BTWB = tm.tensors[k]
-                    A.petscmat.destroy()
-                    BTWB.destroy()
-                for k in tm.solver.keys():
-                    tm.solver[k].ksp.destroy()
-        self.BBCTW_dict[self.problem.nref].destroy()
-        for level in range(self.problem.nref+1):
-            self.BBCTWB_dict[level].destroy()
-
-        if info:
-            PETSc.Sys.Print("[info] Done with manual destroys")
-        gc.collect()
